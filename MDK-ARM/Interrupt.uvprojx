@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+﻿<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
 <Project xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="project_projx.xsd">
 
   <SchemaVersion>2.1</SchemaVersion>
@@ -340,7 +340,7 @@
               <MiscControls></MiscControls>
               <Define>N32G031, USE_STDPERIPH_DRIVER,LOG_ENABLE=1,SYSCLK_SRC=SYSCLK_USE_HSI,SYSCLK_FREQ=8000000</Define>
               <Undefine></Undefine>
-              <IncludePath>..\inc;..\..\..\..\..\..\firmware\CMSIS\core;..\..\..\..\..\..\firmware\CMSIS\device;..\..\..\..\..\..\firmware\n32g031_std_periph_driver\inc;..\peripherals\sensor;..\peripherals\radio;..\peripherals\radio\delay;..\peripherals\radio\llcc68;..\peripherals\common;..\peripherals\bsp;..\peripherals\app;..\peripherals\log;..\peripherals\radio\llcc68_example\llcc68_send;..\peripherals\radio\llcc68_example\llcc68_recive</IncludePath>
+              <IncludePath>..\inc;..\firmware\CMSIS\core;..\firmware\CMSIS\device;..\firmware\n32g031_std_periph_driver\inc;..\peripherals\sensor;..\peripherals\radio;..\peripherals\radio\delay;..\peripherals\radio\llcc68;..\peripherals\common;..\peripherals\bsp;..\peripherals\app;..\peripherals\log;..\peripherals\radio\llcc68_example\llcc68_send;..\peripherals\radio\llcc68_example\llcc68_recive</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -387,7 +387,7 @@
             <File>
               <FileName>startup_n32g031.s</FileName>
               <FileType>2</FileType>
-              <FilePath>..\..\..\..\..\..\firmware\CMSIS\device\startup\startup_n32g031.s</FilePath>
+              <FilePath>..\firmware\CMSIS\device\startup\startup_n32g031.s</FilePath>
             </File>
           </Files>
         </Group>
@@ -397,7 +397,7 @@
             <File>
               <FileName>system_n32g031.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\..\..\..\..\firmware\CMSIS\device\system_n32g031.c</FilePath>
+              <FilePath>..\firmware\CMSIS\device\system_n32g031.c</FilePath>
             </File>
           </Files>
         </Group>
@@ -407,67 +407,67 @@
             <File>
               <FileName>misc.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\..\..\..\..\firmware\n32g031_std_periph_driver\src\misc.c</FilePath>
+              <FilePath>..\firmware\n32g031_std_periph_driver\src\misc.c</FilePath>
             </File>
             <File>
               <FileName>n32g031_gpio.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\..\..\..\..\firmware\n32g031_std_periph_driver\src\n32g031_gpio.c</FilePath>
+              <FilePath>..\firmware\n32g031_std_periph_driver\src\n32g031_gpio.c</FilePath>
             </File>
             <File>
               <FileName>n32g031_rcc.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\..\..\..\..\firmware\n32g031_std_periph_driver\src\n32g031_rcc.c</FilePath>
+              <FilePath>..\firmware\n32g031_std_periph_driver\src\n32g031_rcc.c</FilePath>
             </File>
             <File>
               <FileName>n32g031_usart.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\..\..\..\..\firmware\n32g031_std_periph_driver\src\n32g031_usart.c</FilePath>
+              <FilePath>..\firmware\n32g031_std_periph_driver\src\n32g031_usart.c</FilePath>
             </File>
             <File>
               <FileName>n32g031_exti.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\..\..\..\..\firmware\n32g031_std_periph_driver\src\n32g031_exti.c</FilePath>
+              <FilePath>..\firmware\n32g031_std_periph_driver\src\n32g031_exti.c</FilePath>
             </File>
             <File>
               <FileName>n32g031_flash.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\..\..\..\..\firmware\n32g031_std_periph_driver\src\n32g031_flash.c</FilePath>
+              <FilePath>..\firmware\n32g031_std_periph_driver\src\n32g031_flash.c</FilePath>
             </File>
             <File>
               <FileName>n32g031_spi.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\..\..\..\..\firmware\n32g031_std_periph_driver\src\n32g031_spi.c</FilePath>
+              <FilePath>..\firmware\n32g031_std_periph_driver\src\n32g031_spi.c</FilePath>
             </File>
             <File>
               <FileName>n32g031_tim.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\..\..\..\..\firmware\n32g031_std_periph_driver\src\n32g031_tim.c</FilePath>
+              <FilePath>..\firmware\n32g031_std_periph_driver\src\n32g031_tim.c</FilePath>
             </File>
             <File>
               <FileName>n32g031_pwr.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\..\..\..\..\firmware\n32g031_std_periph_driver\src\n32g031_pwr.c</FilePath>
+              <FilePath>..\firmware\n32g031_std_periph_driver\src\n32g031_pwr.c</FilePath>
             </File>
             <File>
               <FileName>n32g031_rtc.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\..\..\..\..\firmware\n32g031_std_periph_driver\src\n32g031_rtc.c</FilePath>
+              <FilePath>..\firmware\n32g031_std_periph_driver\src\n32g031_rtc.c</FilePath>
             </File>
             <File>
               <FileName>n32g031_adc.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\..\..\..\..\firmware\n32g031_std_periph_driver\src\n32g031_adc.c</FilePath>
+              <FilePath>..\firmware\n32g031_std_periph_driver\src\n32g031_adc.c</FilePath>
             </File>
             <File>
               <FileName>n32g031_lptim.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\..\..\..\..\firmware\n32g031_std_periph_driver\src\n32g031_lptim.c</FilePath>
+              <FilePath>..\firmware\n32g031_std_periph_driver\src\n32g031_lptim.c</FilePath>
             </File>
             <File>
               <FileName>n32g031_iwdg.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\..\..\..\..\firmware\n32g031_std_periph_driver\src\n32g031_iwdg.c</FilePath>
+              <FilePath>..\firmware\n32g031_std_periph_driver\src\n32g031_iwdg.c</FilePath>
             </File>
           </Files>
         </Group>

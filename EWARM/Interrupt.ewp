@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="iso-8859-1"?>
+﻿<?xml version="1.0" encoding="iso-8859-1"?>
 
 <project>
   <fileVersion>2</fileVersion>
@@ -313,9 +313,9 @@
         <option>
           <name>CCIncludePath2</name>
           <state>$PROJ_DIR$\..\inc</state>
-          <state>$PROJ_DIR$\..\..\..\..\..\..\firmware\CMSIS\core</state>
-          <state>$PROJ_DIR$\..\..\..\..\..\..\firmware\CMSIS\device</state>
-          <state>$PROJ_DIR$\..\..\..\..\..\..\firmware\n32g031_std_periph_driver\inc</state>
+          <state>$PROJ_DIR$\..\firmware\CMSIS\core</state>
+          <state>$PROJ_DIR$\..\firmware\CMSIS\device</state>
+          <state>$PROJ_DIR$\..\firmware\n32g031_std_periph_driver\inc</state>
         </option>
         <option>
           <name>CCStdIncCheck</name>
@@ -969,7 +969,7 @@
   <group>
     <name>CMSIS</name>
     <file>
-      <name>$PROJ_DIR$\..\..\..\..\..\..\firmware\CMSIS\device\system_n32g031.c</name>
+      <name>$PROJ_DIR$\..\firmware\CMSIS\device\system_n32g031.c</name>
     </file>
   </group>
   <group>
@@ -981,22 +981,22 @@
   <group>
     <name>FWLB</name>
     <file>
-      <name>$PROJ_DIR$\..\..\..\..\..\..\firmware\n32g031_std_periph_driver\src\misc.c</name>
+      <name>$PROJ_DIR$\..\firmware\n32g031_std_periph_driver\src\misc.c</name>
     </file>
     <file>
-      <name>$PROJ_DIR$\..\..\..\..\..\..\firmware\n32g031_std_periph_driver\src\n32g031_gpio.c</name>
+      <name>$PROJ_DIR$\..\firmware\n32g031_std_periph_driver\src\n32g031_gpio.c</name>
     </file>
     <file>
-      <name>$PROJ_DIR$\..\..\..\..\..\..\firmware\n32g031_std_periph_driver\src\n32g031_rcc.c</name>
+      <name>$PROJ_DIR$\..\firmware\n32g031_std_periph_driver\src\n32g031_rcc.c</name>
     </file>
     <file>
-      <name>$PROJ_DIR$\..\..\..\..\..\..\firmware\n32g031_std_periph_driver\src\n32g031_usart.c</name>
+      <name>$PROJ_DIR$\..\firmware\n32g031_std_periph_driver\src\n32g031_usart.c</name>
     </file>
   </group>
   <group>
     <name>STARTUP</name>
     <file>
-      <name>$PROJ_DIR$\..\..\..\..\..\..\firmware\CMSIS\device\startup\startup_n32g031_EWARM.S</name>
+      <name>$PROJ_DIR$\..\firmware\CMSIS\device\startup\startup_n32g031_EWARM.S</name>
     </file>
   </group>
   <group>
