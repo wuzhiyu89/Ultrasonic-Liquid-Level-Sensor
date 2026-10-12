@@ -1,0 +1,62 @@
+# ===== 编译产物 (Keil / IAR / GCC 通用) =====
+*.o
+*.obj
+*.d
+*.dep
+*.crf
+*.iex
+*.sbr
+*.axf
+*.elf
+*.hex
+*.bin
+*.map
+*.lst
+*.htm
+*.lnp
+*.plg
+*.bak*
+*.ept
+*.eide-template
+
+# ===== Keil MDK-ARM 输出目录 =====
+Objects/
+Listings/
+MDK-ARM/build/
+MDK-ARM/bin/
+MDK-ARM/out/
+
+# Keil 用户依赖文件 (保留 .uvprojx 工程文件)
+*.uvguix.*
+*.uvoptx
+
+# ===== IAR EWARM 输出 =====
+EWARM/**/Obj/
+EWARM/**/Exe/
+EWARM/**/List/
+EWARM/**/Debug/
+EWARM/**/Settings/*.dbgdt
+EWARM/**/Settings/*.uvguix.*
+EWARM/**/Backup*/
+
+# ===== GCC / Make 输出 =====
+build/
+
+# ===== JLink =====
+JLinkLog.txt
+
+# ===== 构建日志 =====
+*.log
+build_log.txt
+
+# ===== IDE / 编辑器个人配置 =====
+.vscode/launch.json
+.eide/log
+.eide.usr.ctx.json
+.clangd
+.cache/
+
+# ===== 系统 =====
+.DS_Store
+Thumbs.db
+desktop.ini

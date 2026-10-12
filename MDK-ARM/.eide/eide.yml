@@ -1,0 +1,365 @@
+version: "4.1"
+name: Interrupt
+type: ARM
+deviceName: null
+packDir: null
+srcDirs: []
+virtualFolder:
+  name: <virtual_root>
+  files: []
+  folders:
+    - name: STARTUP
+      files:
+        - path: ../../../../../../firmware/CMSIS/device/startup/startup_n32g031.s
+      folders: []
+    - name: CMSIS
+      files:
+        - path: ../../../../../../firmware/CMSIS/device/system_n32g031.c
+      folders: []
+    - name: FWLB
+      files:
+        - path: ../../../../../../firmware/n32g031_std_periph_driver/src/misc.c
+        - path: ../../../../../../firmware/n32g031_std_periph_driver/src/n32g031_gpio.c
+        - path: ../../../../../../firmware/n32g031_std_periph_driver/src/n32g031_rcc.c
+        - path: ../../../../../../firmware/n32g031_std_periph_driver/src/n32g031_usart.c
+        - path: ../../../../../../firmware/n32g031_std_periph_driver/src/n32g031_exti.c
+        - path: ../../../../../../firmware/n32g031_std_periph_driver/src/n32g031_flash.c
+        - path: ../../../../../../firmware/n32g031_std_periph_driver/src/n32g031_spi.c
+        - path: ../../../../../../firmware/n32g031_std_periph_driver/src/n32g031_tim.c
+        - path: ../../../../../../firmware/n32g031_std_periph_driver/src/n32g031_pwr.c
+        - path: ../../../../../../firmware/n32g031_std_periph_driver/src/n32g031_rtc.c
+        - path: ../../../../../../firmware/n32g031_std_periph_driver/src/n32g031_adc.c
+        - path: ../../../../../../firmware/n32g031_std_periph_driver/src/n32g031_lptim.c
+        - path: ../../../../../../firmware/n32g031_std_periph_driver/src/n32g031_iwdg.c
+      folders: []
+    - name: USER
+      files:
+        - path: ../src/main.c
+        - path: ../src/n32g031_it.c
+      folders: []
+    - name: DOC
+      files:
+        - path: ../readme.txt
+      folders: []
+    - name: peripherals
+      files: []
+      folders:
+        - name: app
+          files:
+            - path: ../peripherals/app/app_cmd.c
+            - path: ../peripherals/app/app_cmd.h
+            - path: ../peripherals/app/app_dev_param.c
+            - path: ../peripherals/app/app_dev_param.h
+            - path: ../peripherals/app/app_lora.c
+            - path: ../peripherals/app/app_lora.h
+            - path: ../peripherals/app/app_lowpower.c
+            - path: ../peripherals/app/app_lowpower.h
+            - path: ../peripherals/app/app_pair.c
+            - path: ../peripherals/app/app_pair.h
+            - path: ../peripherals/app/app_power.c
+            - path: ../peripherals/app/app_power.h
+            - path: ../peripherals/app/app_runtime_state.c
+            - path: ../peripherals/app/app_runtime_state.h
+            - path: ../peripherals/app/app_sensor.c
+            - path: ../peripherals/app/app_sensor.h
+            - path: ../peripherals/app/app_time.c
+            - path: ../peripherals/app/app_time.h
+          folders: []
+        - name: bsp
+          files:
+            - path: ../peripherals/bsp/bsp_adc.c
+            - path: ../peripherals/bsp/bsp_adc.h
+            - path: ../peripherals/bsp/bsp_gpio.c
+            - path: ../peripherals/bsp/bsp_gpio.h
+            - path: ../peripherals/bsp/bsp_lowpower.c
+            - path: ../peripherals/bsp/bsp_lowpower.h
+            - path: ../peripherals/bsp/bsp_rtc.c
+            - path: ../peripherals/bsp/bsp_rtc.h
+            - path: ../peripherals/bsp/bsp_uart.c
+            - path: ../peripherals/bsp/bsp_uart.h
+          folders: []
+        - name: common
+          files:
+            - path: ../peripherals/common/crc16_modbus.c
+            - path: ../peripherals/common/crc16_modbus.h
+            - path: ../peripherals/common/protocol_util.h
+            - path: ../peripherals/common/storage.c
+            - path: ../peripherals/common/storage.h
+            - path: ../peripherals/common/time_convert.c
+            - path: ../peripherals/common/time_convert.h
+          folders: []
+        - name: radio
+          files:
+            - path: ../peripherals/LLCC68N32G031-board.c
+            - path: ../peripherals/radio/llcc68-board.h
+            - path: ../peripherals/radio/radio.h
+            - path: ../peripherals/radio/llcc68/llcc68.c
+            - path: ../peripherals/radio/llcc68/llcc68.h
+            - path: ../peripherals/radio/llcc68/project_config.h
+            - path: ../peripherals/radio/llcc68/radio.c
+            - path: ../peripherals/radio/delay/delay.c
+            - path: ../peripherals/radio/delay/delay.h
+          folders: []
+        - name: sensor
+          files:
+            - path: ../peripherals/sensor/level_uart.c
+            - path: ../peripherals/sensor/level_uart.h
+            - path: ../peripherals/sensor/water_cu.c
+            - path: ../peripherals/sensor/water_cu.h
+          folders: []
+        - name: log
+          files:
+            - path: ../peripherals/log/log.c
+            - path: ../peripherals/log/log.h
+          folders: []
+dependenceList: []
+outDir: build
+miscInfo:
+  uid: 08413051952efcb0fcf3183608378dbb
+targets:
+  N32G031:
+    cppPreprocessAttrs:
+      defineList:
+        - N32G031
+        - USE_STDPERIPH_DRIVER
+        - LOG_ENABLE=1
+        - SYSCLK_SRC=SYSCLK_USE_HSI
+        - SYSCLK_FREQ=8000000
+      incList:
+        - ../inc
+        - ../../../../../../firmware/CMSIS/core
+        - ../../../../../../firmware/CMSIS/device
+        - ../../../../../../firmware/n32g031_std_periph_driver/inc
+        - ../peripherals/sensor
+        - ../peripherals/radio
+        - ../peripherals/radio/delay
+        - ../peripherals/radio/llcc68
+        - ../peripherals/common
+        - ../peripherals/bsp
+        - ../peripherals/app
+        - ../peripherals/log
+        - ../peripherals/radio/llcc68_example/llcc68_send
+        - ../peripherals/radio/llcc68_example/llcc68_recive
+        - .cmsis/include
+        - RTE/_N32G031
+      libList: []
+    excludeList: []
+    settings:
+      debugger: cortex-debug
+    toolchain: AC6
+    toolchainConfigMap:
+      AC5:
+        archExtensions: ""
+        cpuType: Cortex-M0
+        floatingPointHardware: none
+        options: ""
+        scatterFilePath: ""
+        storageLayout:
+          RAM:
+            - id: 1
+              isChecked: false
+              mem:
+                size: "0x0"
+                startAddr: "0x0"
+              noInit: false
+              tag: RAM
+            - id: 2
+              isChecked: false
+              mem:
+                size: "0x0"
+                startAddr: "0x0"
+              noInit: false
+              tag: RAM
+            - id: 3
+              isChecked: false
+              mem:
+                size: "0x0"
+                startAddr: "0x0"
+              noInit: false
+              tag: RAM
+            - id: 1
+              isChecked: true
+              mem:
+                size: "0x2000"
+                startAddr: "0x20000000"
+              noInit: false
+              tag: IRAM
+            - id: 2
+              isChecked: false
+              mem:
+                size: "0x0"
+                startAddr: "0x0"
+              noInit: false
+              tag: IRAM
+          ROM:
+            - id: 1
+              isChecked: false
+              isStartup: false
+              mem:
+                size: "0x0"
+                startAddr: "0x0"
+              tag: ROM
+            - id: 2
+              isChecked: false
+              isStartup: false
+              mem:
+                size: "0x0"
+                startAddr: "0x0"
+              tag: ROM
+            - id: 3
+              isChecked: false
+              isStartup: false
+              mem:
+                size: "0x0"
+                startAddr: "0x0"
+              tag: ROM
+            - id: 1
+              isChecked: true
+              isStartup: true
+              mem:
+                size: "0x10000"
+                startAddr: "0x8000000"
+              tag: IROM
+            - id: 2
+              isChecked: false
+              isStartup: false
+              mem:
+                size: "0x0"
+                startAddr: "0x0"
+              tag: IROM
+        useCustomScatterFile: false
+      AC6:
+        archExtensions: ""
+        cpuType: Cortex-M0
+        floatingPointHardware: none
+        options:
+          version: 3
+          afterBuildTasks:
+            - name: "[Copy linker output for Keil User Commands]"
+              abortAfterFailed: true
+              command: mkdir ${KEIL_OUTPUT_DIR} & copy "${OutDir}\${ProjectName}.axf" "${KEIL_OUTPUT_DIR}\${ProjectName}.axf"
+              disable: false
+            - name: fromelf --bin --output=.\bin\Interrupt.bin .\Objects\Interrupt.axf
+              abortAfterFailed: true
+              command: fromelf --bin --output=.\bin\Interrupt.bin .\Objects\Interrupt.axf
+              disable: false
+          asm-compiler:
+            $use: asm-auto
+            defines: []
+            misc-controls: ""
+          beforeBuildTasks: []
+          c/cpp-compiler:
+            language-c: c99
+            language-cpp: c++11
+            link-time-optimization: false
+            one-elf-section-per-function: true
+            optimization: level-1
+            short-enums#wchar: true
+            warnings: no-warnings
+          global:
+            output-debug-info: enable
+            use-microLIB: true
+          linker:
+            $outputTaskExcludes:
+              - .bin
+            misc-controls: --diag_suppress=L6329
+            output-format: elf
+            ro-base: "0x00000000"
+            rw-base: "0x20000000"
+            xo-base: ""
+        scatterFilePath: n32g031.sct
+        storageLayout:
+          RAM:
+            - id: 1
+              isChecked: false
+              mem:
+                size: "0x0"
+                startAddr: "0x0"
+              noInit: false
+              tag: RAM
+            - id: 2
+              isChecked: false
+              mem:
+                size: "0x0"
+                startAddr: "0x0"
+              noInit: false
+              tag: RAM
+            - id: 3
+              isChecked: false
+              mem:
+                size: "0x0"
+                startAddr: "0x0"
+              noInit: false
+              tag: RAM
+            - id: 1
+              isChecked: true
+              mem:
+                size: "0x2000"
+                startAddr: "0x20000000"
+              noInit: false
+              tag: IRAM
+            - id: 2
+              isChecked: false
+              mem:
+                size: "0x0"
+                startAddr: "0x0"
+              noInit: false
+              tag: IRAM
+          ROM:
+            - id: 1
+              isChecked: false
+              isStartup: false
+              mem:
+                size: "0x0"
+                startAddr: "0x0"
+              tag: ROM
+            - id: 2
+              isChecked: false
+              isStartup: false
+              mem:
+                size: "0x0"
+                startAddr: "0x0"
+              tag: ROM
+            - id: 3
+              isChecked: false
+              isStartup: false
+              mem:
+                size: "0x0"
+                startAddr: "0x0"
+              tag: ROM
+            - id: 1
+              isChecked: true
+              isStartup: true
+              mem:
+                size: "0x10000"
+                startAddr: "0x8000000"
+              tag: IROM
+            - id: 2
+              isChecked: false
+              isStartup: false
+              mem:
+                size: "0x0"
+                startAddr: "0x0"
+              tag: IROM
+        useCustomScatterFile: true
+    uploadConfigMap:
+      JLink:
+        baseAddr: ""
+        bin: ""
+        cpuInfo:
+          cpuName: N32G031F8
+          vendor: Nations
+        otherCmds: ""
+        proType: 1
+        speed: 8000
+      STLink:
+        address: "0x08000000"
+        bin: ""
+        elFile: None
+        optionBytes: .eide/n32g031.st.option.bytes.ini
+        otherCmds: ""
+        proType: SWD
+        resetMode: default
+        runAfterProgram: true
+        speed: 4000
+    uploader: STLink
