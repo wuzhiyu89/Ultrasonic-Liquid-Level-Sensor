@@ -5,22 +5,34 @@
 #include "n32g031_exti.h"
 #include "misc.h"
 #include <stddef.h>
-/* RTC备份寄存器标记，代替STM32 BKP，判断RTC是否已经初始化完成 */
+/* SDK 无 RTC_BKPxR（0x4C~0x9C 均为 reserved），初始化标记走 RTC->CTRL 的 BAKP 位(bit18)，
+ * 见 RTC_STORE_OPERATION_SET。以下两个宏当前无代码引用，保留占位。 */
 #define RTC_BKP_FLAG        0xA5A5U
-/* N32G031 RTC有RTC_BKP0R ~ RTC_BKP19R，选用0号备份寄存器 */
 #define RTC_BKP_INDEX       0U
 
-/* LSI内部RC，典型30kHz；(128)*(234)=29952，逼近30000，输出≈1Hz
- * ⚠️重要：LSI温漂24~36kHz，日历会跑慢/跑快，WakeUp计数值不等于真实秒！
- * 本方案不启用LSE，PC14/PC15保留作为普通GPIO给LLCC68 LoRa使用
+/* LSI 内部 RC 典型 30kHz：(128)*(234)=29952，逼近 30000，输出≈1Hz
+ * ⚠️ LSI 温漂 24~36kHz，日历会跑慢/跑快，WakeUp 计数值不等于真实秒
+ * 不启用 LSE：PC14/PC15 留给 LLCC68 LoRa 当普通 GPIO
  */
 #define RTC_ASYNC_PRE   0x7FU   /* 异步预分频 128 */
 #define RTC_SYNC_PRE    233U    /* 同步预分频 233；+1后234 */
 
+/* RTC 域本次上电是否"还在走"（init 里按 CTRL.BAKP 标记判断）：
+ *   1 = 保留（热复位：看门狗/软复位/NRST/短暂掉电未破 RTC 域）-> 日历可信
+ *   0 = 已被复位（冷启动）-> 日历是默认值，需从 Flash 恢复或等网关校时
+ * ⚠️ 置 1 时上层不要用 Flash 的"最近上报时刻"覆盖 RTC，否则时间会倒退最多 1 小时。
+ */
+static uint8_t s_rtcDomainKept = 0U;
+
+uint8_t bsp_rtc_domain_kept(void)
+{
+    return s_rtcDomainKept;
+}
+
 /**
- * @brief  RTC硬件初始化 使用内部LSI RC振荡器，不使用外部LSE晶振
- * @note 板子已定型 PC14/PC15分配给LoRa BUSY/DIO1，不能开启LSE；
- *       ⚠️LSI温漂大，不适合需要高精度日历时间戳；仅适合Stop模式唤醒。
+ * @brief  RTC 硬件初始化，用内部 LSI RC，不使用外部 LSE 晶振
+ * @note 板子已定型：PC14/PC15 分配给 LoRa BUSY/DIO1，不能开 LSE；
+ *       ⚠️ LSI 温漂大，不适合高精度日历时间戳，仅适合 Stop 模式唤醒。
  */
 uint8_t bsp_rtc_init(void)
 {
@@ -28,9 +40,10 @@ uint8_t bsp_rtc_init(void)
     /* 使能PWR外设时钟 */
     RCC_EnableAPB1PeriphClk(RCC_APB1_PERIPH_PWR, ENABLE);
 
-    /* 判断RTC是否已经初始化（备份寄存器标记，VBAT不掉电则标记保留） */
+    /* 判断RTC是否已经初始化（RTC_CTRL.BAKP 位，RTC域不掉电则标记保留） */
     if(RTC_GetStoreOperation() == RTC_STORE_OPERATION_SET)
     {
+        s_rtcDomainKept = 1U;               /* RTC 一直在走：日历可信，上层别用 Flash 覆盖它 */
         RCC_EnableRtcClk(ENABLE);
         if(RTC_WaitForSynchro() != SUCCESS)
         {
@@ -91,13 +104,8 @@ uint8_t bsp_rtc_init(void)
 
 /**
  * @brief 设置日历时间
- * @warning LSI源RTC时间会漂移，不适合高精度时间记录
- * @note 改用RTC_SetDate / RTC_SetTime；不再调用RTC_ConfigCalendar，避免清除WakeUp/AlarmA配置
- */
-/**
- * @brief 设置日历时间
- * @warning LSI源RTC时间会漂移，不适合高精度时间记录
- * @note 保存原有RTC预分频配置再调用RTC_ConfigCalendar，保护WakeUp/AlarmA配置
+ * @warning LSI 源 RTC 时间会漂移，不适合高精度时间记录
+ * @note 复用原有预分频配置调用 RTC_ConfigCalendar，避免动到 WakeUp/AlarmA 配置
  */
 uint8_t bsp_rtc_set_calendar(const bsp_rtc_calendar_t *p_cal)
 {
@@ -127,7 +135,6 @@ uint8_t bsp_rtc_set_calendar(const bsp_rtc_calendar_t *p_cal)
 
     RTC_EnableWriteProtection(DISABLE);
 
-    /* 使用ConfigCalendar，但传入原有分频配置，不会改动WakeUp的时钟源 */
     if(RTC_ConfigCalendar(RTC_FORMAT_BIN, &rtc_init_cfg, &rtc_date, &rtc_time, DISABLE) != SUCCESS)
     {
         RTC_EnableWriteProtection(ENABLE);
@@ -167,13 +174,9 @@ void bsp_rtc_get_calendar(bsp_rtc_calendar_t *p_cal)
 }
 
 /**
- * @brief RTC WakeUp周期唤醒定时器，Stop模式唤醒源
- * @param cnt: 计数器数值；0关闭WakeUp
- * @note 唤醒周期 = (cnt+1) 秒（CK_SPRE 1Hz时钟）；LSI有温漂，不是精确秒
- * @note 【关键】改时钟源/计数值前必须先 RTC_EnableWakeUp(DISABLE)，
- *       否则配置不生效(WUT根本不计数的坑就是这里)；使能顺序按厂商例程：
- *       ConfigWakeUpClock -> SetWakeUpCounter -> ConfigInt -> EnableWakeUp
- * @note 同时使能 EXTI Line20(RTC Wakeup)：STOP模式要靠EXTI线把MCU唤醒
+ * @brief RTC WakeUp 周期唤醒定时器（Stop 唤醒源），cnt = 周期【秒】(1~65535)，0 = 关闭
+ * @note  ⚠️ 改时钟源/计数值前必须先 RTC_EnableWakeUp(DISABLE)，否则 WUT 不计数；
+ *        顺序：ConfigWakeUpClock -> SetWakeUpCounter -> ConfigInt -> EnableWakeUp。CK_SPRE=1Hz，LSI 有温漂。
  */
 void bsp_rtc_wakeup_config(uint32_t cnt)
 {
@@ -189,7 +192,7 @@ void bsp_rtc_wakeup_config(uint32_t cnt)
     }
 
     RTC_ConfigWakeUpClock(RTC_WKUPCLK_CK_SPRE_16BITS);
-    RTC_SetWakeUpCounter(cnt);
+    RTC_SetWakeUpCounter(cnt - 1U);         /* 周期 = 计数值+1 秒 -> 这里 -1 才是 cnt 秒 */
     RTC_ConfigInt(RTC_INT_WUT, ENABLE);
     (void)RTC_EnableWakeUp(ENABLE);
 
@@ -218,44 +221,5 @@ void bsp_rtc_clr_wakeup_flag(void)
     RTC_ClrFlag(RTC_FLAG_WTF);
 }
 
-/**
- * @brief 设置AlarmA绝对时刻闹钟（也能把MCU从STOP唤醒）
- * @param p_alarm 目标时刻
- * @note AlarmA 内部连到 EXTI Line17，STOP唤醒需要使能该EXTI线
- */
-uint8_t bsp_rtc_set_alarm_a(const bsp_rtc_calendar_t *p_alarm)
-{
-    RTC_AlarmType alarm_cfg;
-    EXTI_InitType  exti_cfg;
-
-    if(p_alarm == NULL)
-    {
-        return 1;
-    }
-    RTC_AlarmStructInit(&alarm_cfg);
-    alarm_cfg.AlarmTime.Hours    = p_alarm->hour;
-    alarm_cfg.AlarmTime.Minutes  = p_alarm->minute;
-    alarm_cfg.AlarmTime.Seconds  = p_alarm->second;
-    alarm_cfg.AlarmTime.H12      = RTC_AM_H12;
-    alarm_cfg.DateWeekMode    = RTC_ALARM_SEL_WEEKDAY_DATE;
-    alarm_cfg.DateWeekValue   = p_alarm->day;
-    alarm_cfg.AlarmMask       = RTC_ALARMMASK_NONE;
-
-    RTC_EnableWriteProtection(DISABLE);
-    RTC_EnableAlarm(RTC_A_ALARM, DISABLE);
-    RTC_SetAlarm(RTC_FORMAT_BIN, RTC_A_ALARM, &alarm_cfg);
-    RTC_EnableAlarm(RTC_A_ALARM, ENABLE);
-    RTC_ConfigInt(RTC_INT_ALRA, ENABLE);
-    RTC_EnableWriteProtection(ENABLE);
-
-    /* RTC Alarm 内部连到 EXTI Line17 */
-    RCC_EnableAPB2PeriphClk(RCC_APB2_PERIPH_AFIO, ENABLE);
-    EXTI_InitStruct(&exti_cfg);
-    exti_cfg.EXTI_Line    = EXTI_LINE17;
-    exti_cfg.EXTI_Mode    = EXTI_Mode_Interrupt;
-    exti_cfg.EXTI_Trigger = EXTI_Trigger_Rising;
-    exti_cfg.EXTI_LineCmd = ENABLE;
-    EXTI_InitPeripheral(&exti_cfg);
-
-    return 0;
-}
+/* 唤醒只走 RTC WakeUp(WUT/EXTI Line20) 与探针 PB1(EXTI Line1)，不用 AlarmA(EXTI Line17)。
+ * n32g031_it.c 的 RTC_IRQHandler 仍清 ALRA 标志，用于防止硬件置位导致中断反复进入。 */

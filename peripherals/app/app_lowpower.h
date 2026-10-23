@@ -1,8 +1,10 @@
 /**
  * @file app_lowpower.h
- * @brief 应用层低功耗管理：STOP模式进出 + RTC周期唤醒
- * @note  唤醒源：RTC WakeUp(周期检测) / DIO1 EXTI(LoRa收到下行帧) / 探针 EXTI(有水)
- *        STOP唤醒后自动恢复系统时钟(PLL 48MHz)和TIM3
+ * @brief 应用层低功耗：STOP 进出 + RTC 周期唤醒
+ * @note  可用唤醒源只有 RTC WakeUp(EXTI20，周期) 与探针 EXTI1(有水)。
+ *        ⚠️ 不能靠 DIO1(PC15) 唤醒：睡前被 BSP_GPIO_SetAllAnalog() 设成模拟、收不到边沿。
+ *        STOP 唤醒后由 SystemClock_Config() 重配时钟（只开 HSI、不开 PLL），
+ *        并重新使能 TIM3 和日志串口。
  */
 #ifndef __APP_LOWPOWER_H__
 #define __APP_LOWPOWER_H__
@@ -26,11 +28,10 @@ void app_lowpower_init(void);
 void app_lowpower_config_wakeup(uint32_t sec);
 
 /**
- * @brief 进入STOP模式（阻塞），唤醒后自动恢复时钟
- * @note  睡前 PB7 配输入上拉（方案B）：内部 ~40k 弱上拉把 P-MOS 栅极拉高，
- *        外设域关断到 0V（几 uA）。唤醒后【调用者】必须先 BSP_Periph_Power_On()
- *        把外设域拉回 3.3V + 延时（APP_PERIPH_POR_MS）等外设 POR，再重新 Init 外设。
- *        调用前需先 app_lowpower_config_wakeup() 设好 RTC 唤醒间隔。
+ * @brief 进入 STOP（阻塞），唤醒后自动恢复时钟
+ * @note  睡前 PB7 输入上拉关断外设域（几 uA）；唤醒后调用者必须
+ *        BSP_Periph_Power_On() 拉回 3.3V + 延时等 POR，再重新 Init 外设。
+ *        调用前先 app_lowpower_config_wakeup() 设好 RTC 唤醒间隔。
  */
 void app_lowpower_enter_stop_pullup(void);
 

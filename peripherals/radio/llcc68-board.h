@@ -33,7 +33,7 @@ extern "C"
 #include "LLCC68/LLCC68.h"
 #include "llcc68.h"
 
-//������˳��ٽ�����������
+// 临界区宏：HAVE_OS=1 时用 FreeRTOS 的 vPortEnter/ExitCritical，否则编译成空操作
 #if HAVE_OS
 	#define CRITICAL_SECTION_BEGIN( )	vPortEnterCritical()
 	#define CRITICAL_SECTION_END( )	vPortExitCritical()
@@ -72,8 +72,19 @@ void LLCC68IoDbgInit( void );
 void LLCC68ResetInit( void ); 
 /*!
  * \brief Blocking loop to wait while the Busy pin in high
+ *
+ * \remark 内部有硬超时(50ms)：模组没供电/坏掉/SPI 断时不会永久卡死，
+ *         超时后直接返回并让 LLCC68GetBusyTimeoutCount() 计数 +1
  */
 void LLCC68WaitOnBusy( void );
+
+/*!
+ * \brief BUSY 等待超时的累计次数(只增不减)
+ * \retval 0 = 从没超时(射频正常响应)；非 0 = 至少发生过一次
+ * \note  上层用"这次读到的值比上次大"判定"射频无响应"，
+ *        见 app_lora.c 的 LoraApp_TakeBusyFault()
+ */
+uint16_t LLCC68GetBusyTimeoutCount( void );
 
 /*!
  * \brief Checks if the given RF frequency is supported by the hardware
@@ -86,7 +97,7 @@ bool LLCC68CheckRfFrequency( uint32_t frequency );
 void LLCC68DelayMs(uint32_t ms);
 
 /*
- * ��ʱ����ʼ�� 
+ * 收发超时定时器(TIM3)初始化：实现在 LLCC68N32G031-board.c（节拍 = 1ms）
  */
 void LLCC68TimerInit(void);
 void LLCC68SetTxTimerValue(uint32_t nMs);
@@ -100,12 +111,13 @@ void LLCC68SetNss(uint8_t lev );
 uint8_t LLCC68SpiInOut(uint8_t data);
 
 /*!
- * \brief STOP唤醒后恢复板级GPIO/SPI/EXTI配置，不触发射频复位
- */
-void LLCC68IoRecover( void );
-
-/*!
- * \brief 获取TIM3的1ms自由运行节拍(HSI时基)，用于非阻塞计时
+ * \brief 获取TIM3的自由运行节拍(HSI时基)，用于非阻塞计时
+ * \note  单位 = **1ms**：Prescaler/Period 与 SystemCoreClock 同源
+ *        （SystemCoreClock = SYSCLK_FREQ = 8e6，见 LLCC68TimerInit）；
+ *        实测 0x04 配对帧空口间隔 4.96s（配置 5s）可佐证。
+ * \note  ⚠️ 前提是工程定义了 SYSCLK_FREQ=8000000；若换到没定义它的工程
+ *        （如 EWARM 工程没写 Define），SystemCoreClock 会落到默认 48e6，
+ *        那时节拍才会变成 6ms。
  * \note  STOP睡眠期间TIM3停止计数，只能用于醒着时的时间差
  */
 uint32_t LLCC68GetTimerCount( void );

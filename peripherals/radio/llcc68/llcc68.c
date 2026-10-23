@@ -521,6 +521,8 @@ void LLCC68SetTxParams( int8_t power, RadioRampTimes_t rampTime )
 {
     uint8_t buf[2];
 
+    /* ⚠️ 本工程 LLCC68GetDeviceId() 两个分支都返回 SX1262(见 radio.c)，
+     * 所以下面这个 SX1261 分支当前【永远不会走到】，实际只走 else(SX1262)。 */
     if( LLCC68GetDeviceId( ) == SX1261 )
     {
         /* 若之前被当成 SX1262 配过，0x08D8 里会残留 TxClamp 补丁(0x1E)，
@@ -776,6 +778,9 @@ RadioError_t LLCC68GetDeviceErrors( void )
 		error.Value = 0;
 
     LLCC68ReadCommand( RADIO_GET_ERROR, ( uint8_t* )err, 2 );
+    /* GetErrors(0x17) 的 2 个数据字节：err[0] = ErrStatus[15:8]，err[1] = ErrStatus[7:0]。
+     * 与 llcc68.h 的 RadioError_t 位域、数据手册一致：PA ramp 错 = bit8 -> err[0] 的 bit0，
+     * 其余校准/锁相错误 = err[1] 的 bit0~6。两字节顺序与手册一致，没有弄反。 */
     error.Fields.PaRamp     = ( err[0] & ( 1 << 0 ) ) >> 0;
     error.Fields.PllLock    = ( err[1] & ( 1 << 6 ) ) >> 6;
     error.Fields.XoscStart  = ( err[1] & ( 1 << 5 ) ) >> 5;

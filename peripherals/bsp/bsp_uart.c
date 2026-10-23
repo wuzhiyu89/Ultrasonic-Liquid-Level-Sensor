@@ -4,10 +4,10 @@
 /*
  * 液位模块 UART 接收（PA10 = USART1_RX, AF4）
  *
- * 【为什么是 USART1 而不是 USART2】官方 USART/Printf 例程 inc/main.h：
+ * 【为什么是 USART1】官方 USART/Printf 例程 inc/main.h：
  *     USART1: RxPin=PA10 TxPin=PA9  AF=GPIO_AF4_USART1
  *     USART2: RxPin=PA3  TxPin=PA2  AF=GPIO_AF4_USART2
- *   PA10 属于 USART1。以前写成 "USART2 + AF10" 时接收通路根本不存在。
+ *   PA10 只挂在 USART1 上，配成 USART2 时接收通路根本不存在。
  *
  * 引脚配置照官方例程：AF_PP + 上拉 + AF4。
  * GPIOA 的 PA9 仍由 level_uart.c 当普通 GPIO 输出做触发脉冲（日志 TX 在 PB6，
@@ -45,7 +45,8 @@ static void level_uart_usart_init(uint32_t baudrate)
     USART_InitStructure.Mode                = USART_MODE_RX | USART_MODE_TX;  /* TX 给日志用(PB6) */
     USART_Init(USART1, &USART_InitStructure);
 
-    /* USART_Init 会清掉 RXDNEIE 与 UE，这里重新打开 */
+    /* 本SDK的 USART_Init 只重写字长/校验/收发使能(CTRL1)、STOP位(CTRL2)、流控(CTRL3)，
+     * 不会动 RXDNEIE(CTRL1 bit5) 和 UE(bit13)；这里仍显式重开一次，不依赖库实现细节 */
     USART_ConfigInt(USART1, USART_INT_RXDNE, ENABLE);
     USART_Enable(USART1, ENABLE);
 }

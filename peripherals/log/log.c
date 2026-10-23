@@ -35,13 +35,12 @@ void log_init(void)
     USART_InitStructure.StopBits            = USART_STPB_1;
     USART_InitStructure.Parity              = USART_PE_NO;
     USART_InitStructure.HardwareFlowControl = USART_HFCTRL_NONE;
-    /* Mode 必须包含 RX：液位模块的接收(PA10=USART1_RX)也用这个 USART1，
-     * 只写 TX 会把接收方向关掉，液位就再也收不到数据了 */
+    /* ⚠️ Mode 必须含 RX：液位模块的接收(PA10=USART1_RX)也用这个 USART1 */
     USART_InitStructure.Mode                = USART_MODE_TX | USART_MODE_RX;
     USART_Init(LOG_USARTx, &USART_InitStructure);
     USART_Enable(LOG_USARTx, ENABLE);
 
-    /* wait UART stable, avoid first char garbled */
+    /* 等 UART 稳定，避免首字符乱码 */
     for (volatile uint32_t i = 0U; i < 10000U; i++) { __NOP(); }
 }
 

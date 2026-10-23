@@ -1,16 +1,17 @@
 /**
  * @file app_dev_param.h
- * @brief 设备持久化参数：设备地址(烧录固化)、网关地址(配对写入/解绑清除)；传感器配置等，保存到Flash，断电不丢失
+ * @brief 设备持久化参数：网关地址(配对写入/解绑清除) + 传感器配置 + 设备字段，存 Flash 掉电不丢
  *
- * 【配对/绑定 与 Flash 的关系（2026-09 新增）】
- *   出厂：Flash 里【只有本机设备地址】，网关地址 = FF FF FF（未绑定）。
- *   上电：app_runtime_state 里 gw_addr 无效(FF FF FF / 00 00 00) -> 进配对模式
- *         （见 app_pair.c）：每 5s 发一帧 0x04 配对请求（目的地址 FF FF FF），
- *         收到网关应答(0x80)后把应答帧里的网关地址写进 Flash -> 下次上电直接进主程序。
- *   解绑：网关下发 0x05 -> 设备先回 2 次 ACK(间隔 5s) -> app_dev_param_clear_gw_addr()
- *         把网关地址写回 FF FF FF -> 关唤醒/关射频 -> STOP 等下次上电
- *         （【不是】立刻回配对模式：本次运行不再发 0x04，下次上电读到未绑定才进配对）。
- *   设备地址 dev_addr 仍然只允许产线烧录，运行期不改。
+ * 【地址模型】
+ *   设备地址 = 0x21 + 96 位 UID（13 字节），由芯片 UID 每次上电现算，不落 Flash，
+ *   也没有产线写址接口（见 app_dev_param_build_dev_addr()）。
+ *   Flash 里只存 13 字节网关地址 = 0x11 + 网关 UID；13×FF = 未绑定。
+ *
+ * 【配对/绑定与 Flash 的关系】
+ *   出厂/解绑后：Flash 网关地址 = 13×FF。
+ *   上电：gw_addr 无效（前缀不是 0x11，或全 FF/全 00）-> 进配对模式（app_pair.c），
+ *         每 5s 发一帧 0x04（目的 13×FF），收到 0x80 后把帧头网关地址写进 Flash。
+ *   解绑：0x05 -> 先回 2 次 ACK(间隔 5s) -> 网关地址写回 13×FF -> 关唤醒/关射频 -> 复位。
  */
 #ifndef __APP_DEV_PARAM_H__
 #define __APP_DEV_PARAM_H__
@@ -21,68 +22,74 @@
 extern "C" {
 #endif
 
-/* ========= Flash参数存储配置，务必选择芯片最后一页，避开代码段 ========= */
+/* ========= Flash参数存储配置：落在 n32g031.sct 预留的参数区里，避开代码段 =========
+ * 参数区 = 0x0800F800 ~ 0x0800FFFF（2KB，见 MDK-ARM/n32g031.sct 的 LR_PARAM_STORAGE，
+ * 代码只用到 0x0800F7FF）；该地址正好是芯片页的起点 —— N32G031 页大小 512B=0x200
+ * （见厂商 Flash 例程的 FLASH_PAGE_SIZE），store/erase 都按这一页走。 */
 #define DEV_PARAM_FLASH_PAGE_ADDR    0x0800F800U
 /* 魔术字，用来判断Flash参数是否有效 */
 #define DEV_PARAM_MAGIC              0xA55AA55AU
-/* 参数格式版本，写在 DevParamFlash_t.reserved[0]。
- * 固件改了"出厂默认参数"后必须把这个版本号 +1：
- * 上电发现 Flash 里的版本和固件不一致时，保留产线固化的设备地址，
- * 只把传感器配置刷成新的出厂默认值再写回（否则老板子永远用着旧默认值，
- * 比如"休眠周期默认 30s"这种改动在老板子上不生效）。
- *   V1 = 初始版本（reserved[0] = 0）
- *   V2 = 休眠周期默认 30s（detect_interval_s: 10 -> 30）
- *   V3 = 新增配对绑定功能：迁移时把网关地址清成 FF FF FF（未绑定），
- *        升级完上电直接进配对模式（见下面 DEV_PARAM_MIGRATE_CLEAR_GW）
- *
- *   ⚠️ 2026-10-05：协议 0x01 载荷里"检测间隔/上报间隔"的单位由【分钟】改成【秒】
- *      （与网关 app/protocol/lora_business.c 的"用户口径改版"对齐，两边都不换算）。
- *      这【不涉及 Flash 格式】：Flash 里存的本来就是秒，所以【不升版本号、老板子不用迁移】；
- *      受影响的只有"从网关收到载荷那一刻"的解析，见 app_cmd.h 的 APP_INTERVAL_UNIT 开关。
- */
-#define DEV_PARAM_CFG_VER            3U
 
-/* 【迁移开关】参数版本不一致时，要不要把网关地址清成 FF FF FF(未绑定)：
- *   1 = 清（【当前】联调：升级固件后上电立刻进配对模式，方便验证 5s 配对帧）
- *   0 = 保留 Flash 里已配对的网关地址（【量产升级固件时改成 0】，
- *       否则一次固件升级会把现场所有已绑定设备的绑定关系清掉，全都要重新配对）
- * 注意：不管填 0 还是 1，"设备地址"永远保留，只动网关地址。 */
-#ifndef DEV_PARAM_MIGRATE_CLEAR_GW
-#define DEV_PARAM_MIGRATE_CLEAR_GW   1
-#endif
+/* ============ 时间戳单独一页 ============
+ * 时间戳每小时写一次，如果和网关地址/设备字段/传感器配置挤在同一页，
+ * 每次都要"擦整页 -> 整页重写"，擦写中掉电会把绑定关系一起抹掉
+ * （现场表现："设备突然变回未绑定，要重新配对"）。
+ * 所以时间戳搬到紧邻的第二页，各写各的：写坏最多丢时间（网关下次 0x01 会补）。
+ * 参数区 0x0800F800~0x0800FFFF 共 2KB = 4 个 512B 页：
+ *   F800 参数页（本结构体） / FA00 时间戳页 / FC00、FE00 预留。 */
+#define DEV_PARAM_TS_PAGE_ADDR       0x0800FA00U
+/* 时间戳页的魔术字（和参数页各认各的） */
+#define DEV_PARAM_TS_MAGIC           0x5A5AC33CU
+/* 参数格式版本，写在 DevParamFlash_t.reserved[0]。
+ * 改了 DevParamFlash_t 布局或出厂默认值时必须 +1：上电发现版本不一致，
+ * 就把传感器配置 / 设备字段刷成新的出厂默认值再整页写回（网关地址保留，
+ * 不清绑定关系）。不靠"结构体大小变没变"判断 —— 大小不变但字段挪位的情况一样有。 */
+#define DEV_PARAM_CFG_VER            1U
+
+/* 测量模式（0x01 的 off6）：决定"超声模块读数怎么变成液位"
+ *   本机超声模块（AJ-SR04M / DYP 类）串口帧输出的是【探头到液面的距离】，所以：
+ *     LEVEL：模块读数直接当液位（模块内部已换算，或探头朝上装）
+ *     DIST ：液位 = 安装高度(cm)×10 - 距离(mm)
+ *   两种之外的取值按 LEVEL（网关侧也是 `!=0 ? 1 : 0`）。 */
+#define DEV_MEASURE_MODE_LEVEL       0U
+#define DEV_MEASURE_MODE_DIST        1U
 
 /**
- * @brief 传感器持久化配置参数【网关下发后只在RAM里用，不写Flash】
- * @note  STOP低功耗不会丢RAM，所以网关参数不需要落Flash；
- *        频繁擦写Flash会缩短寿命，除非确认掉电也必须保住，才调用
- *        app_dev_param_set_sensor_cfg() 落盘
+ * @brief 传感器持久化配置参数【运行时可改，保存在Flash里，断电不丢失】
+ * @note  收到 0x01 时先经 app_runtime_state 只更新 RAM（避免在收包窗口里擦写）；
+ *        Flash 落盘由 main.c 睡前调 app_dev_param_set_sensor_cfg() 完成
+ *        （该函数内部有去重，配置没变就不擦写）
  */
 typedef struct
 {
-    uint16_t     detect_interval_s;      /* 检测参数时间间隔，单位【秒】
-                                          * 收到 0x01 后由 report_interval_s/2 推导(夹到 5min~2h)，
-                                          * 不再采用载荷里的检测间隔，见 app_cmd.h【检测间隔的推导规则】 */
-    uint16_t    report_interval_s;      /* 上报时间间隔，单位【秒】(同上) */
-    uint8_t     same_level_report_en;   /* 相同液位是否上报 0关闭 1开启 */
-    uint16_t    level_alarm_thresh_mm;  /* 液位告警阈值 mm */
+    uint32_t    report_interval_s;      /* 上报间隔，单位秒（0x01 off0-2 uint24，合法 [60,16777215]）
+                                         * 这是【唯一持久化的间隔字段】：检测间隔 = ceil(report/3)
+                                         * 由它现算，不存 Flash。 */
+    uint16_t    level_alarm_thresh_mm;  /* 液位告警阈值 mm；0 = 关闭告警 */
+    int16_t     calib_offset_mm;        /* 校准偏移 mm（有符号），叠加到换算后的液位，
+                                         * 结果按 [0, 65534] 饱和（见 app_sensor_convert_level） */
+    uint16_t    install_height_cm;      /* 安装高度 cm（探头到池底），仅 DIST 模式参与换算，换算时 ×10 */
+    uint8_t     measure_mode;           /* 测量模式：DEV_MEASURE_MODE_LEVEL / _DIST */
+    uint8_t     same_level_report_en;   /* 相同液位是否上报：设备只存不用（行为恒等于"一样也报"） */
+    uint8_t     low_battery_pct;        /* 低电量阈值 %：只存不用，判定在网关侧 */
+    uint8_t     rsv0;                   /* 对齐填充，保证 sizeof 是 4 的倍数 */
 }DevSensorConfig_t;
 
+/* 设备字段长度（0x06/0x08 的 data_len，固定 10 字节 ASCII） */
+#define APP_DEV_FIELD_LEN            10U
+
 /**
- * @brief 存储在Flash里的参数结构体，4字节对齐！
- * NOTE：dev_addr 为产线烧录固化，运行态禁止修改；
- *       gw_addr 出厂为 FF FF FF，由配对(0x04)/解绑(0x05)在运行期改写。
+ * @brief 存在 Flash 参数页里的参数结构体（4 字节对齐）
+ * @note  设备地址不在结构里（由 UID 现算）；gw_addr 出厂/解绑后为 13×FF。
  */
 typedef struct
 {
-    uint32_t magic;                     /* 魔术字，校验是否有效 4字节 */
-    uint8_t dev_addr[PROTO_ADDR_LEN];   /*【烧录固化】3字节设备地址 */
-    uint8_t gw_addr[PROTO_ADDR_LEN];    /* 3字节网关地址：FF FF FF = 未绑定(需要配对) */
-    uint8_t rsv1[2];                    /* 补齐4字节对齐 */
-    /* 【新增】持久化RTC校时时间，网关校时之后保存，上电app_time读取恢复硬件RTC */
-    uint32_t persist_unix_ts;           /* 保存网关校时的unix时间戳；0代表无有效校时 */
-    /* 传感器业务持久化参数【运行可改】 */
-    DevSensorConfig_t sensor_cfg;
+    uint32_t magic;                     /* 魔术字，校验是否有效 */
+    uint8_t gw_addr[PROTO_ADDR_LEN];    /* 13 字节网关地址(0x11+网关UID)：13×FF = 未绑定 */
+    uint8_t rsv1[2];                    /* 补齐 4 字节对齐 */
+    DevSensorConfig_t sensor_cfg;       /* 传感器业务参数（运行可改） */
     uint8_t reserved[4];                /* reserved[0]=DEV_PARAM_CFG_VER，其余预留 */
+    uint8_t field[APP_DEV_FIELD_LEN];   /* 设备字段 10 字节 ASCII（0x06 写 / 0x08 回） */
 }DevParamFlash_t;
 
 /* 编译期断言：Flash写入要求4字节对齐，打包编译时提前报错 */
@@ -94,20 +101,20 @@ typedef char dev_param_align_check[(sizeof(DevParamFlash_t) % 4U == 0U) ? 1 : -1
 void app_dev_param_init(void);
 
 /**
- * @brief 获取本机设备地址
- * @param out_addr [out]输出3字节地址缓存
+ * @brief 获取本机设备地址（由 96 位 UID 现算，不是从 Flash 读的）
+ * @param out_addr [out]输出13字节地址缓存：0x21 + UID(12B)
  */
 void app_dev_param_get_dev_addr(uint8_t out_addr[PROTO_ADDR_LEN]);
 
 /**
  * @brief 获取网关地址
- * @param out_gw_addr [out]输出3字节网关地址缓存（FF FF FF 表示未绑定）
+ * @param out_gw_addr [out]输出13字节网关地址缓存（13×FF 表示未绑定）
  */
 void app_dev_param_get_gw_addr(uint8_t out_gw_addr[PROTO_ADDR_LEN]);
 
 /**
  * @brief【配对绑定用，运行时可调】写入网关地址并落Flash
- * @param gw_addr_in 3字节网关地址（必须是有效地址，FF FF FF 会被拒绝）
+ * @param gw_addr_in 13字节网关地址（必须是有效地址：前缀 0x11 且非全 FF/全 00）
  * @return true成功 false参数非法或Flash操作失败
  * @note  配对模式收到网关应答后调用一次；内部会擦写整页Flash，
  *        只能在主循环上下文调用，禁止中断里调。
@@ -115,7 +122,7 @@ void app_dev_param_get_gw_addr(uint8_t out_gw_addr[PROTO_ADDR_LEN]);
 bool app_dev_param_set_gw_addr(const uint8_t gw_addr_in[PROTO_ADDR_LEN]);
 
 /**
- * @brief【解绑用，运行时可调】把网关地址写成 FF FF FF 并落Flash
+ * @brief【解绑用，运行时可调】把网关地址写成 13×FF（未绑定）并落Flash
  * @return true成功 false Flash操作失败
  * @note  收到网关下发的 0x05 解绑指令、并且【两次 ACK 都发完之后】调用
  *        （顺序见 main.c 的 app_handle_rx_frame()）；调用后设备关唤醒/关射频进 STOP，
@@ -123,6 +130,27 @@ bool app_dev_param_set_gw_addr(const uint8_t gw_addr_in[PROTO_ADDR_LEN]);
  *        同样只能在主循环上下文调用。
  */
 bool app_dev_param_clear_gw_addr(void);
+
+/* ==================== 设备字段（10 字节 ASCII，掉电不丢） ====================
+ * 默认 "YEWEI00000"；网关用 0x06 SET_FIELD 写入（只校验长度 10），
+ * 用 0x07 GET_FIELD 读取时设备回 0x08（载荷就是这 10 字节原文）。
+ * 用途：交付前由网关写入甲方要求的设备编号/字段。 */
+
+/**
+ * @brief 获取设备字段（从 RAM 缓存，10 字节，不保证有结束符）
+ * @param out_field [out]10 字节输出缓冲
+ */
+void app_dev_param_get_field(uint8_t out_field[APP_DEV_FIELD_LEN]);
+
+/**
+ * @brief 写入设备字段并落 Flash（0x06 SET_FIELD 用）
+ * @param in_field 10 字节 ASCII（调用方已校验长度）
+ * @return true 成功；false Flash 擦写失败
+ * @note  【幂等要求】即使内容和当前完全相同，也会重新擦写 Flash 并返回 true。
+ *        因为网关会在 5 秒内最多重发 3 条 0x06，每次都要求再回 0x80，
+ *        所以这里【故意不做"值没变就跳过写"的去重】。
+ */
+bool app_dev_param_set_field(const uint8_t in_field[APP_DEV_FIELD_LEN]);
 
 /**
  * @brief 获取持久化传感器配置(从RAM缓存读取)
@@ -138,29 +166,21 @@ void app_dev_param_get_sensor_cfg(DevSensorConfig_t *out_cfg);
 bool app_dev_param_set_sensor_cfg(const DevSensorConfig_t *in_cfg);
 
 /**
- * @brief 获取Flash保存的持久化unix时间戳
+ * @brief 获取Flash保存的持久化unix时间戳（从 RAM 缓存，上电时已从时间戳页读出）
  * @return 0=无有效时间；非0为unix时间戳
  */
 uint32_t app_dev_param_get_persist_unix_ts(void);
 
 /**
- * @brief 设置并持久化保存unix时间戳到Flash【运行时可改】
+ * @brief 设置并持久化保存unix时间戳到【独立的时间戳页】0x0800FA00
  * @param ts unix时间戳，0代表清除有效时间
  * @return true成功 false flash失败
+ * @note  只擦写时间戳那一页，不再动参数页 —— 写中掉电也不会丢网关地址/设备字段
  */
 bool app_dev_param_set_persist_unix_ts(uint32_t ts);
 
-/*==================== 产线烧录专用接口 ====================*/
-/**
- * @brief【仅产线烧录调用！应用业务禁止调用】烧录写入设备地址+网关地址，擦写整页Flash，只在烧录脚本/烧录工程调用一次
- * @param dev_addr_in 3字节设备地址
- * @param gw_addr_in  3字节网关地址（出厂烧录请填 FF FF FF = 未绑定，让设备自己去配对）
- * @return true成功
- * @note 此函数只在烧录阶段执行一次；设备地址运行态永不修改，
- *       网关地址运行态只能由配对(0x04)/解绑(0x05)两条路径改写
- *       （app_dev_param_set_gw_addr / app_dev_param_clear_gw_addr）
- */
-bool app_dev_param_prog_line_write_addr(const uint8_t dev_addr_in[PROTO_ADDR_LEN], const uint8_t gw_addr_in[PROTO_ADDR_LEN]);
+/* 产线只需烧固件，不需要写地址：设备地址由 UID 现算（无处可写），
+ * 网关地址只允许配对(0x04)/解绑(0x05)两条运行时路径改写。 */
 
 #ifdef __cplusplus
 }

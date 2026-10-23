@@ -47,8 +47,9 @@ void app_runtime_state_set_sensor_cfg(const DevSensorConfig_t *cfg)
     {
         return;
     }
-    /* 只更新RAM：STOP低功耗不会丢RAM，网关参数不需要写Flash。
-     * 如果以后确实要求掉电也保住配置，再调用 app_dev_param_set_sensor_cfg() 落盘 */
+    /* 只更新RAM：STOP低功耗不会丢RAM。
+     * Flash 落盘由 main.c 睡前调 app_dev_param_set_sensor_cfg() 负责
+     * （避开收包窗口做擦写，且那边内部有去重） */
     memcpy(&s_runtime.sensor_cfg, cfg, sizeof(DevSensorConfig_t));
 }
 

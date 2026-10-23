@@ -4,10 +4,14 @@
 #include "n32g031.h"
 
 /*
- * N32G031低功耗模式说明：
- * SLEEP    ：内核停止，外设继续运行
- * STOP     ：电压调节器低功耗，SRAM、寄存器保持；EXTI/LPTIM/RTC可唤醒；普通TIM停止
- * PD       ：PowerDown掉电待机，唤醒后芯片复位
+ * N32G031 低功耗模式：
+ * SLEEP：内核停止，外设继续运行
+ * STOP ：电压调节器低功耗，SRAM/寄存器保持，普通 TIM 停止，可被 EXTI/LPTIM/RTC 唤醒
+ *        本工程只用到两个唤醒源：
+ *          - RTC WakeUp(EXTI20)：周期唤醒（检测间隔/上报点）
+ *          - PB1 探针 EXTI1：水碰到电极时立刻唤醒（WaterDetect_WakeArm 在 SetAllAnalog 之后重新配）
+ *        注意 PC15(DIO1) 被 BSP_GPIO_SetAllAnalog() 设成模拟，收不到边沿，不能唤醒。
+ * PD   ：掉电待机，唤醒后芯片复位
 */
 
 typedef enum
@@ -21,19 +25,5 @@ void BSP_LowPower_Init(void);
 void BSP_EnterLowPower(LowPower_Mode_t mode);
 void BSP_GPIO_SetAllAnalog(void);
 void BSP_EXTI_WakeupPinConfig(GPIO_Module* GPIOx,uint16_t pin,EXTI_TriggerType edge);
-
-/**
- * @brief 用LPTIM做STOP模式的周期唤醒（LPTIM挂在LSI上，STOP下仍在跑）
- * @param period_ms 唤醒周期(ms)
- * @note  周期上限：LSI≈30.4kHz、最大128分频时约276秒；
- *        超过上限会返回0表示配置失败（需要软件分频计数）
- * @retval 0 成功；1 周期太长/配置失败
- */
-uint8_t BSP_LPTIM_WakeupInit(uint32_t period_ms);
-
-/**
- * @brief 停止LPTIM周期唤醒
- */
-void BSP_LPTIM_WakeupDeInit(void);
 
 #endif

@@ -10,27 +10,27 @@ virtualFolder:
   folders:
     - name: STARTUP
       files:
-        - path: ../../../../../../firmware/CMSIS/device/startup/startup_n32g031.s
+        - path: ../firmware/CMSIS/device/startup/startup_n32g031.s
       folders: []
     - name: CMSIS
       files:
-        - path: ../../../../../../firmware/CMSIS/device/system_n32g031.c
+        - path: ../firmware/CMSIS/device/system_n32g031.c
       folders: []
     - name: FWLB
       files:
-        - path: ../../../../../../firmware/n32g031_std_periph_driver/src/misc.c
-        - path: ../../../../../../firmware/n32g031_std_periph_driver/src/n32g031_gpio.c
-        - path: ../../../../../../firmware/n32g031_std_periph_driver/src/n32g031_rcc.c
-        - path: ../../../../../../firmware/n32g031_std_periph_driver/src/n32g031_usart.c
-        - path: ../../../../../../firmware/n32g031_std_periph_driver/src/n32g031_exti.c
-        - path: ../../../../../../firmware/n32g031_std_periph_driver/src/n32g031_flash.c
-        - path: ../../../../../../firmware/n32g031_std_periph_driver/src/n32g031_spi.c
-        - path: ../../../../../../firmware/n32g031_std_periph_driver/src/n32g031_tim.c
-        - path: ../../../../../../firmware/n32g031_std_periph_driver/src/n32g031_pwr.c
-        - path: ../../../../../../firmware/n32g031_std_periph_driver/src/n32g031_rtc.c
-        - path: ../../../../../../firmware/n32g031_std_periph_driver/src/n32g031_adc.c
-        - path: ../../../../../../firmware/n32g031_std_periph_driver/src/n32g031_lptim.c
-        - path: ../../../../../../firmware/n32g031_std_periph_driver/src/n32g031_iwdg.c
+        - path: ../firmware/n32g031_std_periph_driver/src/misc.c
+        - path: ../firmware/n32g031_std_periph_driver/src/n32g031_gpio.c
+        - path: ../firmware/n32g031_std_periph_driver/src/n32g031_rcc.c
+        - path: ../firmware/n32g031_std_periph_driver/src/n32g031_usart.c
+        - path: ../firmware/n32g031_std_periph_driver/src/n32g031_exti.c
+        - path: ../firmware/n32g031_std_periph_driver/src/n32g031_flash.c
+        - path: ../firmware/n32g031_std_periph_driver/src/n32g031_spi.c
+        - path: ../firmware/n32g031_std_periph_driver/src/n32g031_tim.c
+        - path: ../firmware/n32g031_std_periph_driver/src/n32g031_pwr.c
+        - path: ../firmware/n32g031_std_periph_driver/src/n32g031_rtc.c
+        - path: ../firmware/n32g031_std_periph_driver/src/n32g031_adc.c
+        - path: ../firmware/n32g031_std_periph_driver/src/n32g031_lptim.c
+        - path: ../firmware/n32g031_std_periph_driver/src/n32g031_iwdg.c
       folders: []
     - name: USER
       files:
@@ -127,9 +127,9 @@ targets:
         - SYSCLK_FREQ=8000000
       incList:
         - ../inc
-        - ../../../../../../firmware/CMSIS/core
-        - ../../../../../../firmware/CMSIS/device
-        - ../../../../../../firmware/n32g031_std_periph_driver/inc
+        - ../firmware/CMSIS/core
+        - ../firmware/CMSIS/device
+        - ../firmware/n32g031_std_periph_driver/inc
         - ../peripherals/sensor
         - ../peripherals/radio
         - ../peripherals/radio/delay

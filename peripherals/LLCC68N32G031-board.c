@@ -8,15 +8,28 @@
  * 引脚定义见 project_config.h（那是唯一正确的引脚配置来源）。
  *
  * 资源占用（N32G031，SYSCLK=8MHz HSI）:
- *   - SPI1(APB2): PA0 SCK / PA4 MISO / PA5 MOSI (复用编号 AF1), NSS=PA1 软件控制
+ *   - SPI1(APB2): PA0 SCK / PA4 MISO / PA5 MOSI, NSS=PA1 软件控制
+ *                 （复用编号：PA0=AF0，PA4/PA5=AF5，见 LLCC68IoInit）
  *   - EXTI      : PC15 DIO1 上升沿中断，PC15 属于 EXTI4_15 共享中断向量
- *   - TIM3(APB1): 1ms 周期中断，驱动 LoRa 收发超时软定时器（时钟=PCLK1=8MHz）
- *   - SysTick   : LLCC68DelayMs 阻塞式毫秒延时（轮询 COUNTFLAG，不开中断）
+ *   - TIM3(APB1): 更新中断周期 = **1 ms**（见 LLCC68TimerInit）
+ *                 驱动 LoRa 收发超时软定时器（TIM3 计数时钟 = PCLK1 = 8MHz）
+ *   - SysTick   : LLCC68DelayMs 阻塞式延时（轮询 COUNTFLAG，不开中断），节拍也是 **1 ms**
+ *
+ *   【时基：别再被"6 倍"带偏】
+ *     SystemCoreClock 是【编译期常数】= SYSCLK_FREQ（Keil 工程 Define 写的 8000000），
+ *     不是运行时算的（SystemClock_Config() 里没有调 SystemCoreClockUpdate()）。
+ *     于是：SysTick LOAD = 8e6/1000-1 = 7999，按 HCLK=8MHz 计数 -> 正好 1 ms；
+ *           TIM3 Prescaler = 8e6/10000-1 = 799 -> 10kHz，Period=10 -> 正好 1 ms。
+ *     实测：0x04 配对帧的空口间隔是 4.96 s（配置 5 s），证明节拍就是 1 ms。
+ *     ⚠️ 只有换到"没定义 SYSCLK_FREQ 的工程"（例如本目录 EWARM 工程没写 Define）时，
+ *        SystemCoreClock 才会落到默认 48e6，那时这两个定时器才会变成 6 ms/格。
  *   - 未用引脚  : PC4 TXEN / PC3 DIO2 / PC2 DIO3 / PC1 RXEN，配为浮空输入
- *   - PA7 EN    : LoRa 供电使能（预留，本文件暂不驱动）
+ *   - EN 脚     : 厂商 demo 板写法是 PA7；本板不用 —— 本板 LoRa(含液位模块)供电走
+ *                 PB7 外设总电源使能（低=上电，由 bsp_gpio.c 驱动），
+ *                 PA7 是探针激励脚，本文件都不驱动
  *   - PA6 nRST  : 复位脚，复位时推挽输出拉低，之后切为输入上拉
  *
- * 说明: SPI1 在 N32G031 PA0/PA4/PA5 的复用编号 AF0
+ * 说明: SPI1 在 N32G031 的复用编号：PA0(SCK)=AF0，PA4(MISO)/PA5(MOSI)=AF5
  */
 #include <stdio.h>
 #include "misc.h"
@@ -39,12 +52,12 @@ typedef struct __softTimer_s
 } SoftTimer_t;
 
 static DioIrqHandler *dio1IrqCallback = NULL; /* 记录DIO1的回调(RadioOnDioIrq) */
-static volatile uint32_t timer_count = 0;     /* 毫秒计数器 */
+static volatile uint32_t timer_count = 0;     /* TIM3 更新中断计数器(1ms 加一次，见 LLCC68TimerInit) */
 static SoftTimer_t txTimerHandle, rxTimerHandle;
 
 /*------------------------- GPIO 初始化 -------------------------*/
 /* 初始化LLCC68需要的GPIO: NSS为推挽输出(软件控制), BUSY为输入,
- * SCK/MOSI/MISO配置为AF5复用, 其余未用模组引脚配置为浮空输入
+ * SCK(PA0)=AF0、MOSI(PA5)/MISO(PA4)=AF5 复用, 其余未用模组引脚配置为浮空输入
  */
 void LLCC68IoInit( void )
 {
@@ -239,21 +252,44 @@ void LLCC68ResetInit( void )
 
 }
 
-/* 读取Busy引脚电平状态, 等待BUSY拉低; 超过50ms则硬复位射频并置超时标志 */
+/* 等 BUSY 拉低，【硬超时】LLCC68_BUSY_TIMEOUT_MS 后放弃并累计一次超时。
+ *
+ * 【为什么必须有超时】(2026-10-22)
+ *   旧实现是 while(BUSY==1){ ...; LLCC68DelayMs(1); } 的纯死循环，注释却写"超过 50ms
+ *   硬复位射频并置超时"—— 复位和置标志都没实现。后果：模组没供电(PB7 配错/外设域没上电)、
+ *   模组坏、SPI 断线时，任何一个 SPI 命令(读状态、发命令、读寄存器)都会永久卡在这里，
+ *   设备既不睡也不报，串口也没输出，现场只能拔电池。
+ *   本工程【不能靠看门狗兜底】：IWDG 用的是 LSI，STOP 期间照样计数，10 分钟睡一觉必然
+ *   被它复位；N32G031 也没有"IWDG 在 STOP 冻结"的选项位（OB 里只有 nRST_STOP）。
+ *   所以超时只能在这里做，把"卡死"降级成"这一次射频操作失败"，由上层跳过本轮收发。
+ *
+ * 计数用 LLCC68GetBusyTimeoutCount() 取，上层(app_lora)据此判断"射频还在不在"。
+ * 注意：这里【不打印日志】—— 模组真没响应时每个 SPI 事务都会走到这，打印会刷屏，
+ *       而且日志走 USART 阻塞发送，会把本轮时序拖得更乱。 */
+#define LLCC68_BUSY_TIMEOUT_MS   50U
+
+static volatile uint16_t s_busyTimeoutCnt = 0U;
+
 void LLCC68WaitOnBusy( void )
 {
-    uint32_t u32_count = 0U;
+    uint32_t waitedMs = 0U;
 
     while( GPIO_ReadInputDataBit(RADIO_DIO4_BUSY_PORT, RADIO_DIO4_BUSY_PIN) == 1 )
     {
-        if(u32_count++ > 1000)
+        if(waitedMs >= LLCC68_BUSY_TIMEOUT_MS)
         {
-           
-            log_info("wait busy pin timeout\r\n");
-            u32_count = 0;
+            s_busyTimeoutCnt++;         /* 放弃本次等待：射频没响应，交给上层处理 */
+            return;
         }
         LLCC68DelayMs(1);
+        waitedMs++;
     }
+}
+
+/* BUSY 超时累计次数（只增不减）：上层用"自上次检查后有没有变"判断射频是否还活着 */
+uint16_t LLCC68GetBusyTimeoutCount( void )
+{
+    return s_busyTimeoutCnt;
 }
 
 /* 控制SPI的NSS引脚电平: 0低电平选中, 非0高电平释放 */
@@ -287,8 +323,12 @@ bool LLCC68CheckRfFrequency( uint32_t frequency )
 }
 
 /*------------------------- 延时 -------------------------*/
-/* SysTick 轮询实现阻塞毫秒延时(COUNTFLAG 锁存, 不使能SysTick中断)
+/* SysTick 轮询实现阻塞延时(COUNTFLAG 锁存, 不使能SysTick中断)
  * 特点: 不产生中断, 因此在任何上下文(含中断)里调用都安全, 也不会错过计数周期
+ * 节拍 = 1 ms: LOAD = SystemCoreClock/1000-1，而 SystemCoreClock = SYSCLK_FREQ = 8e6
+ * （Keil 工程 Define 定义），SysTick 又按 HCLK=8MHz 计数 -> 8e6/1000 个计数正好 1 ms。
+ * ⚠️ 前提是工程里定义了 SYSCLK_FREQ=8000000；换到没定义它的工程时 SystemCoreClock
+ *    会落到默认 48e6，那时才是"标称值的 6 倍"（本工程不是这种情况，实测 5 s 周期准）。
  * 注意: 若工程中将SysTick用于RTOS心跳, 请改用工程自身的delay实现
  */
 void LLCC68DelayMs(uint32_t ms)
@@ -306,7 +346,9 @@ void LLCC68DelayMs(uint32_t ms)
 }
 
 /*------------------------- 收发超时定时器 -------------------------*/
-/* 使用 TIM3 产生 1ms 定时中断（N32G031 没有 GTIM8，用通用 TIM3）
+/* 使用 TIM3 产生周期更新中断（N32G031 没有 GTIM8，用通用 TIM3）
+ * 周期 = 1 ms（Prescaler/Period 都按 SystemCoreClock=8e6 算，见 LLCC68TimerInit），
+ * 所以 timer_count 的"1"就是 1 ms，下面的 Tx/Rx 超时比较可以直接按 ms 用。
  * 到期后直接回调 RadioOnTxTimeoutIrq/RadioOnRxTimeoutIrq，
  * 所以 radio 层的事件回调(TxTimeout/RxTimeout)运行在中断上下文里，
  * 只能置标志，真正的处理必须回到主循环（见 app_lora.c 的 LoraApp_ProcessIrq）
@@ -360,9 +402,13 @@ void TIM3_IRQHandler(void)
     }
 }
 
-/* 初始化定时器(TIM3, 产生1ms定时中断)
- * 注: TIM3 挂在 APB1; APB1 预分频=1 时 TIM3 计数时钟 = PCLK1 = SystemCoreClock
- *     预分频到 10kHz 计数, 周期 10 -> 1ms 更新中断
+/* 初始化定时器(TIM3, 产生周期更新中断)，周期 = **1 ms**
+ * 注: TIM3 挂在 APB1; APB1 预分频=1 时 TIM3 计数时钟 = PCLK1 = 8MHz。
+ *     Prescaler = SystemCoreClock/10000-1 = 8e6/10000-1 = 799
+ *       -> 计数频率 = 8MHz/800 = 10 kHz
+ *     Period = 10-1 = 9（即每 10 个计数溢出一次）
+ *       -> 更新中断频率 = 10kHz/10 = 1 kHz -> **1 ms 一次** ✔
+ *     调用方（LLCC68TxTimerStart 等）按 ms 用完全正确，不用做换算。
  */
 void LLCC68TimerInit(void)
 {
@@ -395,8 +441,10 @@ void LLCC68TimerInit(void)
 
 
 /* 注意: nMs 在 radio.c 里来自 SetTxConfig/SetRx 的 timeout 参数。
- * 若为 0 则视为"不使用软件超时"，否则 1ms 的 TIM3 会在 1ms 内就把发射打断
- * （历史上就出现过 TxTimeout=0 导致 28 字节的包还没发完就被打断、对端收不到）
+ * 若为 0 则视为"不使用软件超时"(见 LLCC68TxTimerStart 直接不开定时器)，
+ * 否则 TIM3 到期会回调 TxTimeout/RxTimeout 把还没发完的包打断
+ * （TIM3 节拍 = 1ms，见 LLCC68TimerInit；历史上出现过 TxTimeout=0
+ *  导致 28 字节的包还没发完就被打断、对端收不到）
  */
 void LLCC68SetTxTimerValue(uint32_t nMs)
 {
@@ -442,15 +490,9 @@ void LLCC68RxTimerStop(void)
     rxTimerHandle.isRun = 0;
 }
 
-/* 给应用层用的 1ms 自由运行节拍（TIM3 启动后一直计数，HSI 时基） */
+/* 给应用层用的自由运行节拍（TIM3 启动后一直计数，HSI 时基）
+ * 单位 = **1 ms**（见 LLCC68TimerInit），调用方直接按 ms 用 */
 uint32_t LLCC68GetTimerCount(void)
 {
     return timer_count;
-}
-
-/* STOP 唤醒后恢复板级 GPIO/SPI/EXTI 配置（不发射频复位命令，避免模组被复位） */
-void LLCC68IoRecover(void)
-{
-    LLCC68IoInit();                      /* NSS/SCK/MOSI/MISO/BUSY + SPI1 */
-    LLCC68IoIrqInit(dio1IrqCallback);    /* PC15 EXTI + NVIC */
 }

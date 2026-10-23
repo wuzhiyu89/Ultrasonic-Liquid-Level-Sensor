@@ -2,9 +2,9 @@
 #define __LOG_H__
 
 /* 日志串口：USART1，TX = PB6(AF4)，115200 8N1
- * ⚠️ 液位模块的接收(模块TX -> PA10 = USART1_RX, AF4)也在 USART1 上，
- *    两者共享同一个波特率：读液位时临时切到模块波特率，读完切回本值再打印。
- *    所以 log_init() 里 Mode 必须是 TX|RX，否则会把接收方向关掉。 */
+ * ⚠️ 液位模块接收(模块TX -> PA10 = USART1_RX, AF4)也走 USART1，共享同一波特率：
+ *    读液位时临时切到模块波特率，读完切回本值再打印。
+ *    故 log_init() 的 Mode 必须含 TX|RX，否则会关掉接收方向。 */
 #ifndef LOG_BAUD
 #define LOG_BAUD    115200U
 #endif

@@ -10,11 +10,13 @@ extern "C" {
 
 /* 中断回调，给n32g031_it.c调用 */
 void app_time_rtc_wakeup_cb(void);
-void app_time_rtc_alarm_a_cb(void);
 
 /**
  * @brief app_time模块初始化
- * @retval 0成功，非0失败
+ * @retval 0 成功（已经有可信时间：热复位保留的 RTC，或冷启动从 Flash 恢复）
+ *         非0 失败（RTC 起不来 / 还没有可信时间，等网关 0x01 校时）
+ * @note  热复位(RTC 域未掉电)时【不会】用 Flash 时间戳覆盖 RTC，
+ *        否则配对/解绑后的复位会把时间往回拨最多 1 小时。见 bsp_rtc_domain_kept()。
  */
 uint8_t app_time_init(void);
 
@@ -32,15 +34,10 @@ uint8_t app_time_set_unix_ts(uint32_t ts);
 uint32_t app_time_get_unix_ts(void);
 
 /* ==================== 时区：设备内部 UTC，协议边界用【北京时间】 ====================
- * RTC 里存的是【UTC】unix 时间戳（0x01 校时时把网关给的北京时间 -8h 存进去）。
- * 但协议三处的口径都是【北京时间】：
- *   ① 0x01 下行帧的 [年 月 日 周 时 分] —— 网关用 4G 的 AT+CCLK? 补的本地时间；
- *   ② 0x02 上行帧的 [月 日 时 分] —— 网关 app/protocol/lora_business.c 里明确注释
- *      "← 北京时间"，且网关取不到 4G 时间时会【直接采用设备报的这 4 个字节】；
- *   ③ 串口日志（给人看，当然要本地时间）。
- * ⚠️ 2026-10-09 修的 bug：上报帧原先是直接填 RTC 日历(=UTC)，整整差 8 小时。
- *    凡是往协议字段/日志里填时间，一律用 app_time_get_bj_calendar()，别直接拿 RTC 日历。
- * 改时区只改这一个宏。 */
+ * RTC 存的是 UTC（0x01 校时把北京时间 -8h 存进去），但协议字段（0x01 下行时间、
+ * 0x02 上报的 月/日/时/分）和串口日志都是北京时间。
+ * ⚠️ 凡是往协议字段/日志里填时间，一律用 app_time_get_bj_calendar()，别直接拿 RTC 日历
+ *   （直接用会整整差 8 小时）。改时区只改这一个宏。 */
 #define APP_TIME_BJ_OFFSET_S    (8U * 3600U)        /* 北京时间 = UTC + 8 小时 */
 
 /**
@@ -84,23 +81,11 @@ void app_time_save_to_flash(void);
 uint8_t app_time_is_valid(void);
 
 /**
- * @brief 在main while(1)循环调用，处理RTC中断产生的事件
- */
-void app_time_process(void);
-
-/**
- * @brief 取出并清除RTC WakeUp唤醒事件标志
- * @retval true 表示本次唤醒由RTC周期定时器触发（检测周期到达）
- * @note   主循环调用，读后即清；用于区分RTC唤醒和LoRa DIO1唤醒
+ * @brief 取出并清除 RTC WakeUp 唤醒事件标志
+ * @retval true = 本次唤醒由 RTC 周期定时器触发（检测周期到达）
+ * @note  主循环调用，读后即清。用它区分"RTC 周期唤醒"与探针 EXTI1 唤醒。
  */
 bool app_time_take_wakeup_event(void);
-
-/**
- * @brief 置回RTC WakeUp唤醒事件标志
- * @note  供LoRa接收窗口等"临时消费事件后退避"的场景使用，
- *        避免事件被吞导致该轮检测丢失
- */
-void app_time_set_wakeup_event(void);
 
 #ifdef __cplusplus
 }

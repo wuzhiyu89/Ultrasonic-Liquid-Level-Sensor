@@ -16,7 +16,7 @@ extern "C" {
 /**
  * @brief Modbus CRC16计算
  * @param data 待计算数据缓冲区
- * @param len 数据长度，**不包含末尾2字节CRC本身**
+ * @param len 数据长度，不包含末尾 2 字节 CRC 本身
  * @return 原始crc16值；发送帧时：低字节在前，高字节在后
  */
 uint16_t crc16_modbus(const uint8_t *data, uint16_t len);

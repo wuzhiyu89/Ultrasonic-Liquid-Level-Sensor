@@ -7,12 +7,13 @@
 
 //--------------------------------------------- 测试默认配置 ---------------------------------------------
 #define LORA_FRE 433000000               // 收发频率
-/* 发射功率：本模块芯片自报 SX1261(版本串 0x0320="SX1261")，SX1261 分支上限就是 +14dBm。
- * ⚠️ 这里原来是 22 —— 那是【按 SX1262 配的】值。走错 PA 分支(把 SX1261 当 SX1262 配)的
- *    典型症状是：TX_DONE 正常、GetErrors 全 0、自己接收也正常，但空口上对方收不到/只能收到残帧。
- *    改成 14 之后【两个分支都安全】(SX1261 上限 14，SX1262 也远没到上限)。
- *    注：本机已实测走的是 SX1261 分支(0x0320=53 58 31 32 36 31)，所以 22 会被钳成 14，
- *        改不改功能上一样；写 14 只是让配置和注释一致，避免以后换芯片时踩坑。 */
+/* 发射功率 14dBm。
+ * 芯片版本串(0x0320)自报 "SX1261"(53 58 31 32 36 31)，但驱动 LLCC68GetDeviceId()
+ * 两个分支都返回 SX1262(见 radio.c)，所以实际配的是【SX1262 分支】
+ * (deviceSel=0 / HP PA，上限 +22dBm)；本模块的射频通路也确实接在 SX1262/HP PA 一侧(见 app_lora.c)。
+ * 14 对两个分支都安全(SX1261 上限 14，SX1262 上限 22)，所以这里就写 14。
+ * ⚠️ 若真按版本串走 SX1261 分支(deviceSel=1)，射频会从 RFO_LP 出去、没接到天线，
+ *    症状是：TX_DONE 正常、GetErrors 全 0，但空口上对方收不到。 */
 #define LORA_TX_OUTPUT_POWER 14
 
 /* ============================================================================
@@ -40,17 +41,17 @@
 #define LORA_CODINGRATE 2                // 测试默认使用的纠错编码率[1: 4/5,2: 4/6,3: 4/7,4: 4/8]（还嫌不够可改 4=4/8，+1.5dB）
 #define LORA_PREAMBLE_LENGTH 10           // 前导码长度
 #define LORA_LLCC68_SYMBOL_TIMEOUT 0     // Symbols(LLCC68用到的是0,127x用到的是5)
-#define LORA_FIX_LENGTH_PAYLOAD_ON false // 是否为固定长度包(暂时只是LLCC68用到了)
-#define LORA_IQ_INVERSION_ON false       // 这个应该是设置是否翻转中断电平的(暂时只是LLCC68用到了)
+#define LORA_FIX_LENGTH_PAYLOAD_ON false // false=变长包(true 才是固定长度包)；作为 fixLen 传给驱动收发配置(暂时只是LLCC68用到了)
+#define LORA_IQ_INVERSION_ON false       // LoRa IQ 是否翻转(收/发链路区分用，跟中断电平无关)；本工程设为 false(暂时只是LLCC68用到了)
 #define LORA_RX_TIMEOUT_VALUE 5000
-#define TCXO_CTRL_VOLTAGE 2             // setting TCXO voltage supply source [0: 1.6v, 1: 1.7v, 2: 1.8v, 3: 2.2v, 4: 2.4v, 5: 2.7v, 6: 3.0v, 7: 3.5v]
-#define RF_WAKEUP_TIME 100              // setting RF wakeup time,in second
-#define LORA_DATA_SEND_OR_RECEIV_MODE 0 // 数据收发模式，1为发送模式，0为接收模式
+#define TCXO_CTRL_VOLTAGE 2             // setting TCXO voltage supply source [0: 1.6v, 1: 1.7v, 2: 1.8v, 3: 2.2v, 4: 2.4v, 5: 2.7v, 6: 3.0v, 7: 3.5v]；⚠️ 当前全工程无引用(板上无TCXO，LLCC68IoTcxoInit() 为空)
+#define RF_WAKEUP_TIME 100              // setting RF wakeup time,in second；⚠️ 当前全工程无引用
+#define LORA_DATA_SEND_OR_RECEIV_MODE 0 // 数据收发模式，1为发送模式，0为接收模式；⚠️ 当前全工程无引用
 
 /*!
  * Board MCU pins definitions
  */
-//SPI引脚(SPI1: SCK=PA0 MISO=PA4 MOSI=PA5, 均为AF1; NSS=PA1软件控制)
+//SPI引脚(SPI1: SCK=PA0(AF0), MISO=PA4/MOSI=PA5(AF5); NSS=PA1软件控制)
 #define RADIO_NSS_PIN       GPIO_PIN_1
 #define RADIO_NSS_PORT      GPIOA
 #define RADIO_MOSI_PIN      GPIO_PIN_5
@@ -69,10 +70,10 @@
 #define RADIO_DIO4_BUSY_PIN      GPIO_PIN_14
 #define RADIO_DIO4_BUSY_PORT     GPIOC
 
-//  EN 引脚。⚠️注意：真正的"外设电源使能"是 PB7(GPIOB)，不是 PA7！
-//  PA7 实际是探针激励脚(配 PB1 做 ADC)，见 water_cu.c / bsp_gpio.c。
-//  极性资料自相矛盾：这条注释说"高电平lora上电"，而 bsp_gpio.c 按 P-MOS 高边
-//  开关写的是"低=上电"。代码里目前不使用本宏（没人引用），要用前先确认原理图。
+//  EN 引脚 = PB7(GPIOB)，即本板的【外设总电源使能】(高边 P-MOS 开关，见 bsp_gpio.c)：
+//  低 = 上电；输入上拉 = 关断外设域到 0V；驱动高或纯高阻会整板 POR/BOR 复位。
+//  实际驱动由 bsp_gpio.c 的 BSP_Periph_Power_*() 负责，不要用这两个宏去驱动它。
+//  ⚠️ 本宏当前全工程无人引用；PA7 不是 EN，它是探针激励脚(配 PB1 做 ADC，见 water_cu.c)。
 #define RADIO_EN_PIN      GPIO_PIN_7
 #define RADIO_EN_PORT     GPIOB
 

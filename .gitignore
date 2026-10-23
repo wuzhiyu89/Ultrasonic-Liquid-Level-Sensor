@@ -60,3 +60,7 @@ build_log.txt
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# ===== 本地产物 / 参考资料（不入库） =====
+.workbuddy/
+相关资料/

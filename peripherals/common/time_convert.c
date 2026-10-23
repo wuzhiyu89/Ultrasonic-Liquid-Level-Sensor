@@ -13,18 +13,17 @@ static uint8_t is_leap_year(uint16_t year)
     return 0U;
 }
 
-/* 平年每个月天数，下标0不用，1‑12对应月份 */
+/* 平年每个月天数，下标 0 不用，1-12 对应月份 */
 static const uint8_t g_month_days[13] = {0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
 
 /**
- * @brief 计算星期：输入从1970‑01‑01起的总天数；返回1‑7(周一=1，周日=7)
- * @note 1970‑01‑01 是星期四
+ * @brief 计算星期：输入从 1970-01-01 起的总天数；返回 1-7（周一=1，周日=7）
+ * @note 1970-01-01 是星期四
  */
 static uint8_t calc_week_from_days(uint32_t total_days)
 {
-    /* 1970‑01‑01 星期四，距离该日的天数 */
+    /* 0 -> 周日(7)，1 -> 周一 … 6 -> 周六 */
     uint32_t day_of_week = (4U + total_days) % 7U;
-    /* 0→周日(7), 1周一 … 6周六 */
     if(day_of_week == 0U)
     {
         return 7U;

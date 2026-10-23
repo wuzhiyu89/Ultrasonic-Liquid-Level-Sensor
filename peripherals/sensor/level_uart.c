@@ -5,9 +5,9 @@
 #include "n32g031_rcc.h"
 #include <stddef.h>     /* NULL */
 
-/* 超声波模块触发脚：模块的RX输入，接在PA9(原USART2_TX)上
- * 模块要求：给一个高电平触发脉冲，下降沿触发一次测量，
- *          测完从模块TX输出一帧液位值；两次触发间隔必须 > 1s */
+/* 超声波模块触发脚：模块的RX输入，接在 PA9（PA9 的复用功能是 USART1_TX，
+ * 本工程不用其串口复用，只当普通 GPIO 输出）。
+ * 给一个高电平脉冲，下降沿触发一次测量；两次触发间隔必须 > 1s。 */
 #define LEVEL_TRIG_PORT     GPIOA
 #define LEVEL_TRIG_PIN      GPIO_PIN_9
 
@@ -29,7 +29,7 @@ static void level_trigger_init(void)
     GPIO_ResetBits(LEVEL_TRIG_PORT, LEVEL_TRIG_PIN);   /* 空闲低 */
 }
 
-/* 解析状态机 */
+/* 解析状态机：0xFF 帧头 -> 距离高 -> 距离低 -> 校验和 */
 typedef enum
 {
     WAIT_HEADER,
@@ -43,29 +43,17 @@ static uint8_t       g_buf[4];
 static volatile uint16_t      g_level_mm = 0xFFFF; // 0xFFFF代表无效
 static volatile uint16_t      g_level_seq = 0U;    // 每收到一帧有效液位+1
 
-/* 状态机超时保护：200ms 内未收齐完整帧则复位 */
+/* 状态机超时保护：非 WAIT_HEADER 状态下连续 20 次轮询（10ms/次 ≈200ms）
+ * 都没收到任何字节则强制复位；收到字节会立刻把计数清零(见 Level_UART_RxByte) */
 #define UART_RX_TIMEOUT_CNT    20U
 static volatile uint8_t  g_uart_timeout_cnt = 0U;
-
-/* ===== 原始字节抓包：不管帧格式对不对，收到的每个字节都存下来 =====
- * 用途：手里这块传感器型号未知时，先用它把原始帧抓出来，反推波特率/帧格式。 */
-#define LEVEL_RAW_BUF_LEN   64U
-static volatile uint8_t  g_raw_buf[LEVEL_RAW_BUF_LEN];
-static volatile uint16_t g_raw_len = 0U;
 
 /**
  * @brief 串口接收单字节解析，中断回调入口
  */
 void Level_UART_RxByte(uint8_t ch)
 {
-    g_uart_timeout_cnt = 0U;   // <-- 新增：收到字节即清零超时计数
-
-    /* 原始抓包（放在最前面：哪怕帧格式不对，字节也要留下来） */
-    if (g_raw_len < LEVEL_RAW_BUF_LEN)
-    {
-        g_raw_buf[g_raw_len] = ch;
-        g_raw_len++;
-    }
+    g_uart_timeout_cnt = 0U;   /* 收到字节即清零超时计数 */
 
     switch(g_uart_state)
     {
@@ -122,50 +110,6 @@ void Level_UART_RxByte(uint8_t ch)
 }
 
 /**
- * @brief 取走抓到的原始字节（取走后清空）
- * @param buf 输出缓存
- * @param max 缓存大小
- * @retval 实际取到的字节数
- * @note  期间短暂关掉 RX 中断，避免和 ISR 抢缓冲
- */
-uint16_t Level_RawTake(uint8_t *buf, uint16_t max)
-{
-    uint16_t n;
-    uint16_t i;
-
-    if (buf == NULL)
-    {
-        return 0U;
-    }
-
-    USART_ConfigInt(USART1, USART_INT_RXDNE, DISABLE);
-
-    n = g_raw_len;
-    if (n > max)
-    {
-        n = max;
-    }
-    for (i = 0U; i < n; i++)
-    {
-        buf[i] = g_raw_buf[i];
-    }
-    g_raw_len = 0U;
-
-    USART_ConfigInt(USART1, USART_INT_RXDNE, ENABLE);
-    return n;
-}
-
-/**
- * @brief 丢弃已抓到的原始字节
- */
-void Level_RawClear(void)
-{
-    USART_ConfigInt(USART1, USART_INT_RXDNE, DISABLE);
-    g_raw_len = 0U;
-    USART_ConfigInt(USART1, USART_INT_RXDNE, ENABLE);
-}
-
-/**
  * @brief 切换接收波特率（USART1 收发共用，日志会跟着变）
  */
 void Level_UartSetBaud(uint32_t baudrate)
@@ -185,16 +129,11 @@ void Level_UART_Init(void)
     g_uart_state = WAIT_HEADER;
     g_level_mm   = 0xFFFF;
     g_level_seq  = 0U;
-    g_raw_len    = 0U;
 }
 
 /**
- * @brief 进STOP前把触发脚(PA9)钉在确定低电平
- * @note  【复位根因】超声模块由 PB7 域常供电，而 BSP_GPIO_SetAllAnalog() 会把 PA9
- *        也设成模拟(悬空)；TRIG 一悬空模块就可能被噪声误触发、反复测距，
- *        每次测距都是大电流脉冲 -> 电源跌落 -> RST_CAUSE=POR/BOR 复位。
- *        睡前把 TRIG 保持为"输出低"(模块的空闲电平)就不会误触发。
- *        在 BSP_GPIO_SetAllAnalog() 之后、关 GPIO 时钟之前调用。
+ * @brief 进STOP前把触发脚(PA9)钉在低电平；须在 BSP_GPIO_SetAllAnalog() 之后调用
+ * @note  模块在 PB7 域上、STOP 期间断电，TRIG 悬空会被噪声误触发 -> 测距电流脉冲 -> POR/BOR 复位。
  */
 void Level_TrigHoldLow(void)
 {
@@ -224,8 +163,8 @@ uint16_t Level_Get_Val(void)
 }
 
 /**
- * @brief 状态机超时轮询，由主循环每10ms调用一次
- * @note  若状态机卡在非WAIT_HEADER状态超过200ms，强制复位
+ * @brief 状态机超时轮询（只有 Level_Measure() 在等帧时每10ms调用一次）
+ * @note  非 WAIT_HEADER 状态连续 200ms 没收到字节（收到即清零计数）则强制复位
  */
 void Level_UART_TimeoutPoll(void)
 {
@@ -241,11 +180,8 @@ void Level_UART_TimeoutPoll(void)
 }
 
 /**
- * @brief 触发一次液位测量并等待一帧新的有效数据
- * @param timeout_ms 最长等待时间
- * @retval 0~65535 液位mm；0xFFFF 超时/无有效数据
- * @note   触发脚PA9：先给高电平，再拉低，下降沿触发模块测一次；
- *         模块触发周期必须大于1s，业务上每个检测周期只调用一次即可
+ * @brief 触发一次液位测量并等待一帧新数据；返回 0~65535 液位mm，0xFFFF 超时/无数据
+ * @param timeout_ms 最长等待时间；PA9 先拉高再拉低（下降沿触发），两次触发间隔必须 > 1s
  */
 uint16_t Level_Measure(uint32_t timeout_ms)
 {

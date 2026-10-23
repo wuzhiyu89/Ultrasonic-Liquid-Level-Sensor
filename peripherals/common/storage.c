@@ -38,10 +38,8 @@ bool storage_flash_erase_page(uint32_t page_addr)
 }
 
 /**
- * @brief  N32G031 Flash写，最小写入单元为单字(4字节)
- * @param  flash_addr: 写入起始地址，必须4字节对齐
- * @param  data: 数据源
- * @param  len: 字节长度，必须是4的倍数
+ * @brief N32G031 Flash 写，最小写入单元为单字(4 字节)
+ * @param flash_addr 写入起始地址，须 4 字节对齐；len 为字节长度，须为 4 的倍数
  */
 bool storage_flash_write(uint32_t flash_addr, const uint8_t *data, uint16_t len)
 {

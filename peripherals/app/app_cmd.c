@@ -8,59 +8,17 @@
 #include "log.h"
 #include "delay.h"      /* delay_ms(): 收发模式切换等待用 */
 
-/* 双槽命令队列，缓解网关连续下发两条命令时第二条被丢弃的问题 */
-#define APP_CMD_QUEUE_SIZE  2U
-static AppCmdMsg_t g_appCmdQueue[APP_CMD_QUEUE_SIZE];
-static uint8_t     g_cmd_count = 0U;
-
-void app_cmd_push_msg(const uint8_t *buf, uint16_t len)
+bool app_cmd_build_ack_frame(uint8_t *ack_buf,
+                            uint16_t ack_buf_max,
+                            uint16_t *ack_len,
+                            uint8_t func_code,
+                            const uint8_t gw_addr[PROTO_ADDR_LEN],
+                            const uint8_t dev_addr[PROTO_ADDR_LEN],
+                            const uint8_t *data_ptr,
+                            uint8_t data_len)
 {
-    if ((buf == NULL) || (len == 0U) || (len > APP_CMD_BUF_MAX))
-    {
-        return;
-    }
-    /* 双槽全满则丢弃，依靠网关重传补偿 */
-    if (g_cmd_count >= APP_CMD_QUEUE_SIZE)
-    {
-        return;
-    }
-    memcpy(g_appCmdQueue[g_cmd_count].rx_buf, buf, len);
-    g_appCmdQueue[g_cmd_count].rx_len = len;
-    g_appCmdQueue[g_cmd_count].ready = true;
-    g_cmd_count++;
-}
-
-bool app_cmd_pop_msg(AppCmdMsg_t *outMsg)
-{
-    if (outMsg == NULL)
-    {
-        return false;
-    }
-    if (g_cmd_count == 0U)
-    {
-        return false;
-    }
-    memcpy(outMsg, &g_appCmdQueue[0], sizeof(AppCmdMsg_t));
-    /* 前移剩余消息 */
-    if (g_cmd_count > 1U)
-    {
-        memcpy(&g_appCmdQueue[0], &g_appCmdQueue[1], sizeof(AppCmdMsg_t));
-    }
-    g_cmd_count--;
-    return true;
-}
-
-static bool app_cmd_build_ack_frame(uint8_t *ack_buf,
-                                    uint16_t ack_buf_max,
-                                    uint16_t *ack_len,
-                                    uint8_t func_code,
-                                    const uint8_t gw_addr[3],
-                                    const uint8_t dev_addr[3],
-                                    const uint8_t *data_ptr,
-                                    uint8_t data_len)
-{
-    uint16_t frame_body_len = 2U + 1U + 3U + 3U + 1U + 1U + data_len;
-    uint16_t total_len = frame_body_len + 2U;
+    uint16_t frame_body_len = PROTO_FIXED_HEAD_LEN + data_len;
+    uint16_t total_len = frame_body_len + PROTO_CRC_LEN;
     if (total_len > ack_buf_max)
     {
         *ack_len = 0U;
@@ -70,10 +28,10 @@ static bool app_cmd_build_ack_frame(uint8_t *ack_buf,
     *p++ = PROTO_HEADER_0;
     *p++ = PROTO_HEADER_1;
     *p++ = PROTO_VER_V1;
-    memcpy(p, gw_addr, 3U);
-    p += 3U;
-    memcpy(p, dev_addr, 3U);
-    p += 3U;
+    memcpy(p, gw_addr, PROTO_ADDR_LEN);         /* 13 字节：0x11 + 网关 UID */
+    p += PROTO_ADDR_LEN;
+    memcpy(p, dev_addr, PROTO_ADDR_LEN);        /* 13 字节：0x21 + 本机 UID */
+    p += PROTO_ADDR_LEN;
     *p++ = func_code;
     *p++ = data_len;
     if ((data_ptr != NULL) && (data_len > 0U))
@@ -84,7 +42,7 @@ static bool app_cmd_build_ack_frame(uint8_t *ack_buf,
     crc16_modbus_append(&ack_buf[2], frame_body_len - 2U);
     *ack_len = total_len;
 
-    /* 把要回给网关的应答帧原样打出来(台架对帧用) */
+    /* 把要回给网关的应答帧逐字节打出来 */
     {
         uint16_t i;
         log_info("[tx] ack func=0x%02X len=%u:", (unsigned)func_code, (unsigned)total_len);
@@ -98,48 +56,58 @@ static bool app_cmd_build_ack_frame(uint8_t *ack_buf,
 }
 
 /**
- * @brief 把 0x01 命令的 13 字节载荷解析成 CmdSetSensorParamData_t
- * @note  逐字节手工拼装, 不依赖结构体内存布局/对齐/主机字节序;
- *        多字节字段按协议规定为小端。
+ * @brief 把 0x01 命令的 18 字节载荷解析成 CmdSetSensorParamData_t
+ * @note  逐字节手工拼装，不依赖结构体布局/对齐/主机字节序；多字节字段按小端解析。
+ *        上报间隔原样镜像 3 字节，拼成 uint32 交给 app_cmd_param_report_s()，
+ *        这样结构体长度始终等于载荷长度，编译期断言才拦得住"改字段忘改长度"。
  */
 static void app_cmd_parse_set_sensor_param(const uint8_t *data, CmdSetSensorParamData_t *out)
 {
-    out->detect_interval_s     = (uint16_t)((uint16_t)data[0] | ((uint16_t)data[1] << 8));
-    out->report_interval_s     = (uint16_t)((uint16_t)data[2] | ((uint16_t)data[3] << 8));
-    out->same_level_report_en  = data[4];
-    out->level_alarm_thresh_mm = (uint16_t)((uint16_t)data[5] | ((uint16_t)data[6] << 8));
-    out->year                  = data[7];
-    out->month                 = data[8];
-    out->day                   = data[9];
-    out->week                  = data[10];
-    out->hour                  = data[11];
-    out->minute                = data[12];
+    out->report_interval_b[0]  = data[0];
+    out->report_interval_b[1]  = data[1];
+    out->report_interval_b[2]  = data[2];
+    out->same_level_report_en  = data[3];
+    out->level_alarm_thresh_mm = (uint16_t)((uint16_t)data[4] | ((uint16_t)data[5] << 8));
+    out->measure_mode          = data[6];
+    out->install_height_cm     = (uint16_t)((uint16_t)data[7] | ((uint16_t)data[8] << 8));
+    /* 校准偏移必须按【有符号】解析：0xFF EC = -20mm。
+     * 先拼成 uint16 再强转 int16 —— 这是 C 里"按二进制原样解释成负数"的标准写法，
+     * 不能写成 (int16_t)(data[9] | (data[10] << 8))，那样在某些编译器上会先做
+     * 有符号提升，0xEC80 这种值的行为就不确定了。 */
+    out->calib_offset_mm       = (int16_t)((uint16_t)((uint16_t)data[9] |
+                                                     ((uint16_t)data[10] << 8)));
+    out->low_battery_pct       = data[11];
+    out->year                  = data[12];
+    out->month                 = data[13];
+    out->day                   = data[14];
+    out->week                  = data[15];
+    out->hour                  = data[16];
+    out->minute                = data[17];
 }
 
 /**
- * @brief 由【上报间隔】推导检测间隔（规则见 app_cmd.h【检测间隔的推导规则】）
+ * @brief 由上报间隔推导检测间隔（规则见 app_cmd.h【检测间隔的推导规则】）
  * @param report_s 上报间隔(秒)
- * @return 检测间隔(秒)，已经夹到 [APP_CMD_DETECT_INTERVAL_MIN_S, APP_CMD_DETECT_INTERVAL_MAX_S]
- * @note  云端只下发上报间隔，载荷里的检测间隔字段不可信（网关填的默认值），
- *        所以设备端一律自己算：detect = report / APP_CMD_DETECT_FROM_REPORT_DIV，
- *        再夹到 5 分钟 ~ 2 小时。
+ * @return 检测间隔(秒)：ceil(report/3)，超过 2h 夹到 2h 上限
+ * @note  全工程唯一推导入口：收 0x01 时打日志、main.c 睡前算睡眠周期都用它。
+ *        返回值最大 7200，uint16 足够。
  */
-#if (APP_CMD_DETECT_DERIVE_FROM_REPORT)
-static uint16_t app_cmd_detect_from_report_s(uint32_t report_s)
+uint16_t app_cmd_detect_from_report_s(uint32_t report_s)
 {
-    uint32_t detect_s = report_s / APP_CMD_DETECT_FROM_REPORT_DIV;
+    uint32_t detect_s = (report_s + (APP_CMD_DETECT_FROM_REPORT_DIV - 1U)) /
+                        APP_CMD_DETECT_FROM_REPORT_DIV;     /* 向上取整 */
 
-    if (detect_s < APP_CMD_DETECT_INTERVAL_MIN_S)
-    {
-        detect_s = APP_CMD_DETECT_INTERVAL_MIN_S;       /* 5 分钟下限 */
-    }
     if (detect_s > APP_CMD_DETECT_INTERVAL_MAX_S)
     {
-        detect_s = APP_CMD_DETECT_INTERVAL_MAX_S;       /* 2 小时上限 */
+        detect_s = APP_CMD_DETECT_INTERVAL_MAX_S;           /* 2 小时上限：周期内检测 >3 次 */
+    }
+
+    if (detect_s == 0U)
+    {
+        detect_s = APP_CMD_DETECT_INTERVAL_MAX_S;           /* 兜底（report=0 已在上游拒绝） */
     }
     return (uint16_t)detect_s;
 }
-#endif
 
 /**
  * @brief 【只允许主循环调用，禁止中断上下文！内部会执行Flash擦写】
@@ -155,7 +123,7 @@ AppCmdRet_t app_cmd_process(const uint8_t *rx_buf,
     {
         return CMD_RET_ERR_PARAM;
     }
-    const uint16_t FRAME_MIN_LEN = PROTO_FRAME_MIN_LEN;  /* 13 = 帧头2+版本1+地址6+功能码1+数据长度1+CRC2 */    
+    const uint16_t FRAME_MIN_LEN = PROTO_FRAME_MIN_LEN;  /* 33 = 帧头2+版本1+网关13+设备13+功能码1+数据长度1+CRC2 */
     if (rx_len < FRAME_MIN_LEN)
     {
         return CMD_RET_ERR_DATALEN;
@@ -171,17 +139,16 @@ AppCmdRet_t app_cmd_process(const uint8_t *rx_buf,
     }
     const ProtoDownFrame_t *p_frame = (const ProtoDownFrame_t *)rx_buf;
     uint8_t data_len = p_frame->data_len;
-    uint16_t frame_without_crc_len = 2U + 1U + 3U + 3U + 1U + 1U + data_len;
-    if ((frame_without_crc_len + 2U) != rx_len)
+    uint16_t frame_without_crc_len = PROTO_FIXED_HEAD_LEN + data_len;
+    if ((frame_without_crc_len + PROTO_CRC_LEN) != rx_len)
     {
         return CMD_RET_ERR_DATALEN;
     }
     if (crc16_modbus_check(&rx_buf[2], rx_len - 2U) == false)
     {
-        /* 【排查用】把"期望的CRC"打出来，直接和网关发的帧尾对比：
-         *   期望 = crc16_modbus(版本字节..数据域末尾)  <- 帧头 AA 55 不参与
-         *   CRC16/Modbus: init=0xFFFF, poly=0xA001(反射), 低字节在前
-         * 例：AA 55 01 11 00 01 21 00 01 80 00 | 期望 4A 76 */
+        /* 【排查用】把"期望的 CRC"打出来直接和帧尾对比：
+         * 期望 = crc16_modbus(版本字节..数据域末尾)，帧头 AA 55 不参与；
+         * CRC16/Modbus: init=0xFFFF, poly=0xA001(反射)，低字节在前 */
         uint16_t calc = crc16_modbus(&rx_buf[2], rx_len - 2U);
         log_info("[cmd] CRC error: expect %02X %02X, got %02X %02X (frame_len=%u)\r\n",
                  (unsigned)(calc & 0xFFU), (unsigned)((calc >> 8U) & 0xFFU),
@@ -192,19 +159,22 @@ AppCmdRet_t app_cmd_process(const uint8_t *rx_buf,
     /*===== 获取运行时本机地址，用于帧地址匹配 =====*/
     AppRuntimeState_t rt;
     app_runtime_state_get(&rt);
-    /* 防御：未初始化有效设备地址直接丢弃包 */
-    if (rt.dev_addr[0] == 0 && rt.dev_addr[1] == 0 && rt.dev_addr[2] == 0)
+    /* 防御：本机设备地址没读到（UID 全 0）时直接丢弃包 */
+    if (proto_addr_is_all_zero(rt.dev_addr))
     {
         *ack_len = 0U;
         return CMD_RET_ERR_DST_ADDR;
     }
-    if (memcmp(p_frame->dev_addr, rt.dev_addr, 3U) != 0U)
+    /* 目的地址：本机 或 广播(13×FF) 都收 —— 有些网关的 ACK 用广播地址回，
+     * 只放行精确匹配会把它们当成"不是给本机的"丢掉 */
+    if ((memcmp(p_frame->dev_addr, rt.dev_addr, PROTO_ADDR_LEN) != 0U) &&
+        (!proto_addr_is_broadcast(p_frame->dev_addr)))
     {
         *ack_len = 0U;
         return CMD_RET_ERR_DST_ADDR;
     }
 
-    /* 通过 CRC + 地址校验, 把整帧原样打出来(台架对帧用) */
+    /* CRC + 地址校验通过，逐字节打出入帧 */
     {
         uint16_t i;
         log_info("[rx] frame func=0x%02X dlen=%u len=%u:",
@@ -216,10 +186,8 @@ AppCmdRet_t app_cmd_process(const uint8_t *rx_buf,
         log_info("\r\n");
     }
 
-    /* 这里【不】再单独等一段: 回 ACK 的等待由发送路径统一负责
-     * (LoraApp_SendSync -> LoraApp_Send 内部等 LORA_TX_MODE_DELAY_MS=1s 再切发射),
-     * 在这里再加一段会叠加成 2s, 容易超出网关的应答窗口。
-     * 也就是: 收到消息 -> 解析组帧 -> 发送路径里等 1s -> 切 TX 发 ACK。 */
+    /* 回 ACK 的等待统一由发送路径负责（LoraApp_Send 内部等 LORA_TX_MODE_DELAY_MS），
+     * 这里不再另加延时，否则会叠加成 1s 超出网关应答窗口。 */
 
     ProtoFuncCode_t func_code = (ProtoFuncCode_t)p_frame->func_code;
     AppCmdRet_t ret_code = CMD_RET_OK;
@@ -227,140 +195,176 @@ AppCmdRet_t app_cmd_process(const uint8_t *rx_buf,
     {
     case CMD_FUNC_SET_SENSOR_PARAM:
     {
-        /* 载荷必须正好是协议约定的 13 字节(方案A: 0-1检测/2-3上报/4相同上报/
-         * 5-6阈值/7-12时间), 长度不符直接回 0x81, 避免按错位字节解析出垃圾参数 */
+        /* 载荷必须正好 18 字节（布局见 app_cmd.h），长度不符直接回 0x86，
+         * 避免按错位字节解析出垃圾参数 */
         if (data_len != APP_CMD_SET_SENSOR_PARAM_LEN)
         {
+            log_info("[cmd] 0x01 rejected: payload len %u != %u\r\n",
+                     (unsigned)data_len, (unsigned)APP_CMD_SET_SENSOR_PARAM_LEN);
             ret_code = CMD_RET_ERR_DATALEN;
             break;
         }
         CmdSetSensorParamData_t rx_param;
         app_cmd_parse_set_sensor_param(p_frame->data, &rx_param);
 
-        /* 载荷单位就是【秒】(2026-10-05 起，与网关口径一致，两边都不换算)；
-         * 这里仍走 APP_CMD_INTERVAL_TO_S 只是为了保留"万一要回到分钟制"的单点开关，
-         * 默认档位下它就是恒等映射，见 app_cmd.h【单位开关】 */
-        uint32_t raw_detect_s = APP_CMD_INTERVAL_TO_S(rx_param.detect_interval_s);
-        uint32_t report_s = APP_CMD_INTERVAL_TO_S(rx_param.report_interval_s);
+        /* 载荷单位就是秒，与网关一致，两边都不换算。
+         * ⚠️ report_s 必须是 uint32：uint24 满量程 16777215，用 uint16 接会静默截断。 */
+        uint32_t report_s = app_cmd_param_report_s(&rx_param);
         uint32_t detect_s;
 
-        /* 【检测间隔不再取载荷里的值】云端只下发上报间隔，0x01 里那个检测间隔是
-         * 网关拿默认值填的、不可信 -> 一律自己按 上报间隔/2 推导，再夹到
-         * [5 分钟, 2 小时]，规则见 app_cmd.h【检测间隔的推导规则】 */
-#if (APP_CMD_DETECT_DERIVE_FROM_REPORT)
+        /* 【只认上报间隔，先校验它】云端是唯一的节奏来源，这里也是唯一把关点。
+         * 越界一律回 0x81，不静默夹取 —— 让云端界面能看见自己配错了。 */
+        if ((report_s < APP_CMD_REPORT_INTERVAL_MIN_S) ||
+            (report_s > APP_CMD_REPORT_INTERVAL_MAX_S))
+        {
+            log_info("[cmd] 0x01 rejected: report interval %lus out of [%u, %lu]\r\n",
+                     (unsigned long)report_s,
+                     (unsigned)APP_CMD_REPORT_INTERVAL_MIN_S,
+                     (unsigned long)APP_CMD_REPORT_INTERVAL_MAX_S);
+            ret_code = CMD_RET_ERR_PARAM;
+            break;
+        }
+
+        /* 检测间隔一律现算，不落 Flash 也不进运行时状态（派生量，存下来只会和 report 打架） */
         detect_s = (uint32_t)app_cmd_detect_from_report_s(report_s);
-#else
-        detect_s = raw_detect_s;
-#endif
 
-        log_info("[cmd] 0x01 set_sensor: report=%lus same=%u thresh=%umm\r\n",
-                 (unsigned long)report_s,
-                 (unsigned)rx_param.same_level_report_en,
-                 (unsigned)rx_param.level_alarm_thresh_mm);
-#if (APP_CMD_DETECT_DERIVE_FROM_REPORT)
-        log_info("[cmd] 0x01 payload detect=%lus IGNORED -> detect=report/%u=%lus (clamp %u~%us)\r\n",
-                 (unsigned long)raw_detect_s,
+        /* 【测量模式归一化】协议只定义 0=液位 / 1=距离，>1 按距离处理。
+         * 距离模式没有安装高度就没法换算（会算成负数 -> 恒 0，表现为"永远空池"），
+         * 所以缺高度时退回液位模式并打告警，不把坏配置带进主流程。 */
+        uint8_t measure_mode = (rx_param.measure_mode != 0U) ? DEV_MEASURE_MODE_DIST
+                                                             : DEV_MEASURE_MODE_LEVEL;
+        if ((measure_mode == DEV_MEASURE_MODE_DIST) && (rx_param.install_height_cm == 0U))
+        {
+            log_info("[cmd] 0x01 !! measure_mode=1 but install_height=0 -> fallback to LEVEL mode\r\n");
+            measure_mode = DEV_MEASURE_MODE_LEVEL;
+        }
+
+        /* 【校时字段全 0 = 这次不校时】网关取不到 4G 时间时会先填 0。
+         * 这不是"非法参数"，必须放行，否则 4G 刚断开那一刻下发的整条命令都会被拒。 */
+        uint8_t time_zero = (((rx_param.year == 0U) && (rx_param.month == 0U) &&
+                              (rx_param.day == 0U) && (rx_param.week == 0U) &&
+                              (rx_param.hour == 0U) && (rx_param.minute == 0U))) ? 1U : 0U;
+
+        log_info("[cmd] 0x01 set_sensor: report=%lus -> detect=%lus (ceil(report/%u), cap %us)\r\n",
+                 (unsigned long)report_s, (unsigned long)detect_s,
                  (unsigned)APP_CMD_DETECT_FROM_REPORT_DIV,
-                 (unsigned long)detect_s,
-                 (unsigned)APP_CMD_DETECT_INTERVAL_MIN_S,
                  (unsigned)APP_CMD_DETECT_INTERVAL_MAX_S);
-#else
-        log_info("[cmd] 0x01 payload detect=%lus (used as-is)\r\n",
-                 (unsigned long)raw_detect_s);
-#endif
-        log_info("[cmd] 0x01 time=%02u-%02u-%02u w%u %02u:%02u\r\n",
-                 (unsigned)rx_param.year, (unsigned)rx_param.month,
-                 (unsigned)rx_param.day, (unsigned)rx_param.week,
-                 (unsigned)rx_param.hour, (unsigned)rx_param.minute);
-
-        /* 检测周期不能为 0/过小: 它是 STOP 的唤醒周期, 太小设备会一直在醒。
-         * 【秒制】下这里就是直接比较秒数(存储字段是 uint16 秒)。
-         * 上报间隔 = 0 直接拒: 它是推导检测间隔的唯一来源, 0 推导不出有意义的值,
-         * 而且会污染后面"按上报间隔调度"的逻辑；回 0x81 让网关/平台知道下发的值不对。
-         * ⚠️ 16 位字段上限 65535 秒 ≈ 18.2 小时。 */
-        if ((report_s == 0U) ||
-            (detect_s < APP_CMD_DETECT_INTERVAL_MIN_S) ||
-            (detect_s > APP_CMD_DETECT_INTERVAL_MAX_S) ||
-            (report_s > APP_CMD_SLEEP_INTERVAL_MAX_S))
+        log_info("[cmd] 0x01 same=%u thresh=%umm mode=%u(%s) height=%ucm offset=%dmm lowbat=%u%%\r\n",
+                 (unsigned)rx_param.same_level_report_en,
+                 (unsigned)rx_param.level_alarm_thresh_mm,
+                 (unsigned)measure_mode,
+                 (measure_mode == DEV_MEASURE_MODE_DIST) ? "DIST" : "LEVEL",
+                 (unsigned)rx_param.install_height_cm,
+                 (int)rx_param.calib_offset_mm,
+                 (unsigned)rx_param.low_battery_pct);
+        if (time_zero != 0U)
         {
-            log_info("[cmd] 0x01 rejected: interval out of range (report=%lus detect=%lus)\r\n",
-                     (unsigned long)report_s, (unsigned long)detect_s);
+            log_info("[cmd] 0x01 time=ALL-ZERO -> skip RTC sync (params still applied)\r\n");
+        }
+        else
+        {
+            log_info("[cmd] 0x01 time=%02u-%02u-%02u w%u %02u:%02u\r\n",
+                     (unsigned)rx_param.year, (unsigned)rx_param.month,
+                     (unsigned)rx_param.day, (unsigned)rx_param.week,
+                     (unsigned)rx_param.hour, (unsigned)rx_param.minute);
+        }
+
+        /* 【校时字段校验】年份只支持 2000~2099，月/日/时/分必须落在合法区间，
+         * 时间全 0 时跳过整段（见上面 time_zero）。
+         * ⚠️ day=0 必须拒：time_convert_calendar_to_unix() 里 (day-1U) 是无符号运算，
+         *    0-1 会回绕成 0xFFFFFFFF，时间戳直接飞到 2106 年，上报周期全乱。
+         * week：0 = 网关没填（下面按日期反算），1~7 = 周一~周日，>7 直接拒。 */
+        if ((time_zero == 0U) &&
+            ((rx_param.year > 99U) ||
+             (rx_param.month == 0U) || (rx_param.month > 12U) ||
+             (rx_param.day == 0U) || (rx_param.day > 31U) ||
+             (rx_param.week > 7U) ||
+             (rx_param.hour > 23U) || (rx_param.minute > 59U)))
+        {
+            log_info("[cmd] 0x01 rejected: bad time %02u-%02u-%02u w%u %02u:%02u\r\n",
+                     (unsigned)rx_param.year, (unsigned)rx_param.month,
+                     (unsigned)rx_param.day, (unsigned)rx_param.week,
+                     (unsigned)rx_param.hour, (unsigned)rx_param.minute);
             ret_code = CMD_RET_ERR_PARAM;
             break;
         }
-        /* 年份只支持 2000~2099, 月份必须在 1~12 */
-        if ((rx_param.year > 99U) ||
-            (rx_param.month == 0U) || (rx_param.month > 12U))
-        {
-            ret_code = CMD_RET_ERR_PARAM;
-            break;
-        }
 
-        /* 【重要】保存网关下发原始北京时间到RAM，用于LoRa上报，不做时区转换 */
-        app_runtime_state_set_gateway_time(rx_param.year,
-                                           rx_param.month,
-                                           rx_param.day,
-                                           rx_param.week,
-                                           rx_param.hour,
-                                           rx_param.minute);
-
-        /* 组装北京时间日历 */
-        bsp_rtc_calendar_t bj_cal;
-        bj_cal.year = 2000U + rx_param.year;
-        bj_cal.month = rx_param.month;
-        bj_cal.day = rx_param.day;
-        bj_cal.week = rx_param.week;
-        bj_cal.hour = rx_param.hour;
-        bj_cal.minute = rx_param.minute;
-        bj_cal.second = 0U;
-
-        uint32_t bj_ts = app_time_calendar_to_unix(&bj_cal);
-        if (bj_ts == 0U)
-        {
-            // 日历非法
-            ret_code = CMD_RET_ERR_PARAM;
-            break;
-        }
-        // 北京时间转UTC，防止无符号下溢
-        // （偏移量只认 app_time.h 的 APP_TIME_BJ_OFFSET_S，别在这里另写一遍 8*3600）
-        if (bj_ts < APP_TIME_BJ_OFFSET_S)
-        {
-            ret_code = CMD_RET_ERR_PARAM;
-            break;
-        }
-        uint32_t utc_ts = bj_ts - APP_TIME_BJ_OFFSET_S;
-
-        if (app_time_set_unix_ts(utc_ts) != 0U)
-        {
-            ret_code = CMD_RET_ERR_PARAM;
-            break;
-        }
-        log_info("[cmd] 0x01 rtc updated, unix_ts=%lu\r\n", (unsigned long)utc_ts);
-        /* 时间不写Flash：STOP低功耗不会丢RAM，掉电后等网关重新校时即可 */
-
-        /* 组装传感器配置，只更新RAM（不写Flash，避免频繁擦写） */
+        /* 只更新 RAM（不写 Flash，避免在收包窗口里擦写），落盘由 main.c 睡前统一做。
+         * 放在校时之前：参数和校时是两件独立的事，校时失败不该让参数白下发。 */
         DevSensorConfig_t new_cfg;
-        new_cfg.detect_interval_s = (uint16_t)detect_s;
-        new_cfg.report_interval_s = (uint16_t)report_s;
-        new_cfg.same_level_report_en = rx_param.same_level_report_en;
+        new_cfg.report_interval_s     = report_s;       /* uint24 -> uint32，不做窄化（不截断） */
         new_cfg.level_alarm_thresh_mm = rx_param.level_alarm_thresh_mm;
-        /* 注：下发帧里的“探针阻值”字段已按需求从协议删除, 不再解析 */
-
+        new_cfg.calib_offset_mm       = rx_param.calib_offset_mm;   /* 有符号，可为负 */
+        new_cfg.install_height_cm     = rx_param.install_height_cm;
+        new_cfg.measure_mode          = measure_mode;   /* 已归一化，见上面 */
+        new_cfg.same_level_report_en  = rx_param.same_level_report_en;
+        new_cfg.low_battery_pct       = rx_param.low_battery_pct;
+        new_cfg.rsv0                  = 0U;
+        /* 注：检测间隔【不存】—— 它是 report 的派生量，由 app_cmd_detect_from_report_s() 现算；
+         *     下发帧里的"探针阻值"字段已按需求从协议删除, 不再解析 */
         app_runtime_state_set_sensor_cfg(&new_cfg);
+
+        /* ---- 校时（时间字段全 0 时整段跳过，参数已经生效） ---- */
+        if (time_zero == 0U)
+        {
+            /* 【重要】保存网关下发原始北京时间到RAM，用于LoRa上报，不做时区转换 */
+            app_runtime_state_set_gateway_time(rx_param.year,
+                                               rx_param.month,
+                                               rx_param.day,
+                                               rx_param.week,
+                                               rx_param.hour,
+                                               rx_param.minute);
+
+            /* 组装北京时间日历 */
+            bsp_rtc_calendar_t bj_cal;
+            bj_cal.year = 2000U + rx_param.year;
+            bj_cal.month = rx_param.month;
+            bj_cal.day = rx_param.day;
+            /* week：0 = 网关没填 -> 先占位 1，等下面算出时间戳后按日期反算（日历转时间戳不看 week） */
+            bj_cal.week = (rx_param.week == 0U) ? 1U : rx_param.week;
+            bj_cal.hour = rx_param.hour;
+            bj_cal.minute = rx_param.minute;
+            bj_cal.second = 0U;
+
+            uint32_t bj_ts = app_time_calendar_to_unix(&bj_cal);
+            if (bj_ts == 0U)
+            {
+                // 日历非法
+                ret_code = CMD_RET_ERR_PARAM;
+                break;
+            }
+            if (rx_param.week == 0U)
+            {
+                /* 网关没填星期：按日期反算（1=周一..7=周日）。1970-01-01 是周四，
+                 * 所以 (天数 + 3) % 7 + 1；RTC 的 week 只是给人看的，不影响计时。 */
+                bj_cal.week = (uint8_t)((((bj_ts / 86400U) + 3U) % 7U) + 1U);
+            }
+            // 北京时间转UTC，防止无符号下溢
+            // （偏移量只认 app_time.h 的 APP_TIME_BJ_OFFSET_S，别在这里另写一遍 8*3600）
+            if (bj_ts < APP_TIME_BJ_OFFSET_S)
+            {
+                ret_code = CMD_RET_ERR_PARAM;
+                break;
+            }
+            uint32_t utc_ts = bj_ts - APP_TIME_BJ_OFFSET_S;
+
+            if (app_time_set_unix_ts(utc_ts) != 0U)
+            {
+                ret_code = CMD_RET_ERR_PARAM;
+                break;
+            }
+            log_info("[cmd] 0x01 rtc updated, unix_ts=%lu\r\n", (unsigned long)utc_ts);
+            /* 时间不写Flash：STOP低功耗不会丢RAM，掉电后等网关重新校时即可 */
+        }
+
         ret_code = CMD_RET_OK;
     }
     break;
 
     case CMD_FUNC_UNBIND:
     {
-        /* 0x05 解绑：载荷必须为空 —— 协议里 0x05 没有载荷，多字节直接判长度错。
-         * 这里【只组 0x80 ACK 返回】，真正的"清网关地址 + 进 STOP 等下次上电"
-         * 由 main.c 的 app_handle_rx_frame() 在【发完 ACK 之后】做。
-         * 顺序约定：先回 ACK(毫秒级) -> 再清 Flash gw_addr=FF FF FF ->
-         *            关 RTC 唤醒 + 关射频 -> STOP 等下次上电(不回配对)。
-         * 注：清 Flash 不能放这里——ACK 还没发 gw_addr 就被清，与协议要求的
-         *     "先回 ACK 再解绑"顺序相反；且 app_cmd_process() 只负责"解析+组应答"，
-         *     副作用(清Flash/STOP)归 main.c，保持职责分离。 */
+        /* 0x05 解绑：载荷必须为空。这里【只组 0x80 ACK】，
+         * "清网关地址 + 复位"由 main.c 在发完 ACK 之后做（副作用归调用方，保持职责分离）。 */
         if (data_len != APP_CMD_UNBIND_DLEN)
         {
             log_info("[cmd] 0x05 unbind: bad dlen=%u (expect 0)\r\n", (unsigned)data_len);
@@ -372,18 +376,66 @@ AppCmdRet_t app_cmd_process(const uint8_t *rx_buf,
     }
     break;
 
+    case CMD_FUNC_SET_FIELD:
+    {
+        /* 0x06 SET_FIELD：写入 10 字节设备字段（ASCII），掉电不丢。
+         * 只校验长度；写入成功回 0x80，Flash 擦写失败回 0x81。
+         * 【幂等】网关 5s 内最多重发 3 条，每次都重写 Flash、都回 0x80。 */
+        uint8_t di;
+
+        if (data_len != APP_DEV_FIELD_LEN)
+        {
+            log_info("[cmd] 0x06 set_field: bad dlen=%u (expect %u)\r\n",
+                     (unsigned)data_len, (unsigned)APP_DEV_FIELD_LEN);
+            ret_code = CMD_RET_ERR_DATALEN;
+            break;
+        }
+        log_info("[cmd] 0x06 set_field:");
+        for (di = 0U; di < APP_DEV_FIELD_LEN; di++)
+        {
+            log_info(" %02X", (unsigned)p_frame->data[di]);   /* hex 打印，不依赖 %c */
+        }
+        log_info("\r\n");
+        ret_code = app_dev_param_set_field(p_frame->data) ? CMD_RET_OK : CMD_RET_ERR_FLASH;
+    }
+    break;
+
+    case CMD_FUNC_GET_FIELD:
+        /* 0x07 GET_FIELD：不组普通 ACK，返回专门状态让 main.c 走
+         * "发 0x08 -> 开 5s 窗口等 0x80 -> 没等到再发一次（最多 2 次）"的流程 */
+        if (data_len != 0U)
+        {
+            log_info("[cmd] 0x07 get_field: bad dlen=%u (expect 0)\r\n", (unsigned)data_len);
+            ret_code = CMD_RET_ERR_DATALEN;
+            break;
+        }
+        log_info("[cmd] 0x07 get_field -> main will send 0x08 (gw uid from this frame)\r\n");
+        *ack_len = 0U;
+        return CMD_RET_FIELD_REQ;
+
+    case CMD_FUNC_FIELD_RESP:
+        /* 0x08 是【设备发出去的】字段应答，网关不会下发；收到说明方向用反了 */
+        log_info("[cmd] 0x08 field_resp is uplink-only (device->gateway)\r\n");
+        ret_code = CMD_RET_ERR_FUNCCODE;
+        break;
+
     case CMD_FUNC_PAIR_BIND:
-        /* 0x04 是【设备发出去的】配对请求（目的地址 FF FF FF），网关不会下发给设备。
+        /* 0x04 是【设备发出去的】配对请求（目的地址 13×FF），网关不会下发给设备。
          * 万一收到，说明方向用反了，回 0x81 让对端知道不支持。 */
         log_info("[cmd] 0x04 pair_bind is uplink-only (device->gateway)\r\n");
         ret_code = CMD_RET_ERR_FUNCCODE;
         break;
 
     case CMD_FUNC_SENSOR_REPORT:
+        /* 0x02 是【设备发出去的】上报帧，网关不会下发 */
         ret_code = CMD_RET_ERR_FUNCCODE;
         break;
     case CMD_FUNC_SET_ALARM:
-        ret_code = CMD_RET_OK;
+        /* 0x03 设置告警阈值：【本固件没有实现】，明确回 0x81。
+         * 不能回 OK —— 那种"假成功"比报错难查得多（平台显示已下发、设备没改）。
+         * 液位告警阈值请走 0x01 的 level_alarm_thresh_mm（off4-5）。 */
+        log_info("[cmd] 0x03 set_alarm NOT implemented -> 0x81 (use 0x01 alarm_thresh)\r\n");
+        ret_code = CMD_RET_ERR_FUNCCODE;
         break;
     case CMD_FUNC_ACK_OK:
     case CMD_FUNC_ACK_ERR_RETRY:
@@ -391,6 +443,18 @@ AppCmdRet_t app_cmd_process(const uint8_t *rx_buf,
         *ack_len = 0U;
         return CMD_RET_OK;
     default:
+        /* 未知功能码：把"功能码 + 载荷"打出来，否则现场不知道网关发了什么 */
+        {
+            uint8_t ui;
+
+            log_info("[cmd] !! unsupported func=0x%02X dlen=%u:", (unsigned)func_code,
+                     (unsigned)data_len);
+            for (ui = 0U; ui < data_len; ui++)
+            {
+                log_info(" %02X", (unsigned)p_frame->data[ui]);
+            }
+            log_info("\r\n");
+        }
         ret_code = CMD_RET_ERR_FUNCCODE;
         break;
     }

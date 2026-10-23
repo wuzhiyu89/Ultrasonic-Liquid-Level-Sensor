@@ -2,23 +2,13 @@
 
 /* 外设总电源使能脚：PB7（板上高边 P-MOS 开关，低 = 上电，高 = 断电）
  *
- * 三档实测：
- *   驱动为高（想断电） → 整板 POR/BOR 复位循环，约 3 秒一次        【不要用】
- *   释放为高阻        → 外设域只有 1.2V（模块不可用），且整板 POR 复位 【不要用】
- *   驱动为低          → 开关全开、外设域正常上电 3.3V ✅（醒着用这档，代价 ~1mA 偏置）
- *   输入上拉(~40k)    → 弱上拉把栅极拉高、P-MOS 关断、外设域掉到 0V ✅（STOP 睡着用这档，几 uA）
+ * 四档实测（决定只能用两档）：
+ *   驱动为高       -> 整板 POR/BOR 复位循环，约 3 秒一次              【不要用】
+ *   释放为高阻     -> 外设域只有 1.2V（模块不可用），且整板 POR 复位    【不要用】
+ *   驱动为低       -> 开关全开、外设域 3.3V，代价 ~1mA 栅极偏置          【醒着用】
+ *   输入上拉(~40k) -> 弱上拉拉高栅极、P-MOS 关断、外设域 0V，几 uA      【STOP 用】
  *
- * 低功耗策略（方案B，2026-10-10 实测几 uA）：
- *   STOP 前 BSP_Periph_Power_PullUp() 把 PB7 配输入上拉，栅极被弱上拉拉高、
- *   P-MOS 关断、外设域掉到 0V（几 uA）。唤醒后 BSP_Periph_Power_On() 驱动低
- *   把外设域拉回 3.3V + 延时等 POR，再重新 Init 外设。
- *
- * ⚠️ 以前还试过方案A（纯高阻释放 PB7），实测外设域只到 1.2V 半开（0.43mA），
- *    且在本板会触发 POR/BOR 复位循环，已删除。方案B 输入上拉能把栅极拉到
- *    关断态才达到几 uA。
- *
- * ⚠️ 顺带更正：以前这里写的是 PA7（那是探针激励脚，配 PB1 做 ADC，见 water_cu.c），
- *    导致"外设电源"的 API 一直在驱动探针，而真正的电源脚 PB7 从未被驱动。
+ * 所以低功耗只有一条路：睡前输入上拉关断外设域，唤醒后驱动低拉回 3.3V + 等 POR。
  */
 #define PERIPH_PWR_PORT     GPIOB
 #define PERIPH_PWR_PIN      GPIO_PIN_7
@@ -42,12 +32,8 @@ static void periph_pwr_pin_pullup(void)
     GPIO_InitPeripheral(PERIPH_PWR_PORT, &GPIO_InitStructure);
 }
 
-/**
- * @brief 强制驱动 PB7 到指定电平（只给 PERIPH_PWR_FORCE 排查用）
- * @param level 0 = 驱动低；1 = 驱动高
- * @note  ⚠️ 这是"驱动"，不是"释放"：按本板实测，驱动高会整板复位循环，
- *        驱动低会多吃约 1mA。正常固件醒着用驱动低（上电），STOP 用上拉（几 uA）。
- */
+/* 把 PB7 配成推挽输出并驱动到指定电平（正常固件只用 level=0）
+ * @param level 0 = 驱动低（外设上电）；1 = 驱动高（本板会复位循环，勿用） */
 static void periph_pwr_pin_drive(uint8_t level)
 {
     GPIO_InitType GPIO_InitStructure;
@@ -74,16 +60,11 @@ static void periph_pwr_pin_drive(uint8_t level)
 }
 
 /**
- * @brief 外设电源脚初始化：默认驱动低（外设上电）
- * @note  PERIPH_PWR_FORCE=1（默认）驱动低上电；=2 驱动高（台架排查，会复位）。
+ * @brief 外设电源脚初始化：驱动低 = 外设上电
  */
 void BSP_Periph_Power_Init(void)
 {
-#if   (PERIPH_PWR_FORCE == 2)
-    periph_pwr_pin_drive(1U);       /* 台架反档试验：驱动高（会复位） */
-#else
-    periph_pwr_pin_drive(0U);       /* 默认：驱动低 = 外设上电 */
-#endif
+    periph_pwr_pin_drive(0U);
 }
 
 /**
@@ -92,11 +73,7 @@ void BSP_Periph_Power_Init(void)
  */
 void BSP_Periph_Power_On(void)
 {
-#if (PERIPH_PWR_FORCE == 2)
-    periph_pwr_pin_drive(1U);       /* 台架反档试验：驱动高 */
-#else
-    periph_pwr_pin_drive(0U);       /* 正常：驱动低 = 外设上电 */
-#endif
+    periph_pwr_pin_drive(0U);
 }
 
 /* 把外设电源脚配成输入+内部上拉 —— STOP 睡前调它关断外设域到 0V（几 uA）。

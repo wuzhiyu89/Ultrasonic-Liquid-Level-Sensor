@@ -480,7 +480,7 @@ LLCC68_t LLCC68;
  */
 static RadioOperatingModes_t OperatingMode;
 
-//------------------------ board code start �� board �ƶ������Ĵ��� -----------------
+//------------------------ board code start —— board 底层驱动代码 -----------------
 RadioOperatingModes_t LLCC68GetOperatingMode( void )
 {
     return OperatingMode;
@@ -502,18 +502,18 @@ uint32_t LLCC68GetBoardTcxoWakeupTime( void )
 }
 
 
-//����DIO2λRF���ƽ�
+// 射频开关控制：把 DIO2 配成 RF switch 控制脚（本板用芯片内部 DIO2 自动控收发）
 void LLCC68IoRfSwitchInit( void )
 {
     LLCC68SetDio2AsRfSwitchCtrl( true );
 }
 
-//�����������ڲ��Զ����ƣ�����ר������
+// 外部天线开关：本板由 DIO2 内部自动控制，这里留空（外部开关脚的写法见下面注释掉的代码）
 void LLCC68AntSwOn( void )
 {
     //GpioInit( &AntPow, RADIO_ANT_SWITCH_POWER, PIN_OUTPUT, PIN_PUSH_PULL, PIN_PULL_UP, 1 );
 }
-//�����������ڲ��Զ����ƣ�����ר������
+// 外部天线开关：本板由 DIO2 内部自动控制，这里留空（外部开关脚的写法见下面注释掉的代码）
 void LLCC68AntSwOff( void )
 {
     //GpioInit( &AntPow, RADIO_ANT_SWITCH_POWER, PIN_ANALOGIC, PIN_PUSH_PULL, PIN_NO_PULL, 0 );
@@ -521,13 +521,14 @@ void LLCC68AntSwOff( void )
 
 uint8_t LLCC68GetDeviceId( void )
 {
-    /* 真读版本字符串(寄存器 0x0320)判断型号，别写死。
-     * 我们这颗芯片自报 "SX1261"（RadioLib 的 LLCC68 类也有同样的兼容说明：
-     * "some LLCC68 chips report as SX1261"）——那么模块自带的 LLCC68 驱动
-     * 原来写死 SX1262 就会走错 PA 分支：
+    /* 读版本字符串(寄存器 0x0320)判断型号。注意：下面两个分支都 return SX1262，
+     * 即使读到 "SX1261" 也照样返回 SX1262 —— 版本串比较目前不影响返回值，
+     * 本工程就固定按 SX1262 分支配置：
      *   SX1262 分支: 写 0x08D8 TxClamp 补丁 + SetPaConfig(0x04,0x07,0x00,0x01)(deviceSel=0) + 功率到+22dBm
      *   SX1261 分支: 不写 0x08D8      + SetPaConfig(0x04,0x00,0x01,0x01)(deviceSel=1) + 功率≤+14dBm
-     * 走错分支的典型症状就是：TX_DONE 正常、GetErrors 全 0，但空口上对方收不到。 */
+     * 本模块自报 "SX1261"，但射频通路实际接在 SX1262/HP PA 一侧(见 app_lora.c)，
+     * 所以必须固定走 SX1262 分支；保留版本串判断只是为了将来适配。
+     * 后果：llcc68.c 里 if( LLCC68GetDeviceId() == SX1261 ) 的分支永远不会走到。 */
     uint8_t ver[6];
 
     LLCC68ReadRegisters( 0x0320, ver, 6 );

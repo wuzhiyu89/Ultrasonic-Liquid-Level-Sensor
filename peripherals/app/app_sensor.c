@@ -4,29 +4,77 @@
 #include "app_time.h"
 #include "app_lora.h"
 #include "app_runtime_state.h"
+#include "protocol_util.h"      /* PROTO_ADDR_LEN = 13（0x21/0x11 + UID） */
 #include "crc16_modbus.h"
 #include "log.h"
 #include <string.h>
 
-/* 上报帧总长 = 13 + SENSOR_DATA_LEN = 13 + 7 = 20 字节
- *
- * 帧结构(索引):
- *   [0]AA [1]55 [2]ver [3..5]gw [6..8]dev [9]func [10]dlen=7 [11..17]数据 [18][19]CRC
- *   数据域 7 字节: 液位高 | 液位低 | 电量% | 月 | 日 | 时 | 分
- *
- * ⚠️ 曾经误判这里"少发一个字节": 其实是网关协议层把恒定开销写成了 14(正确是 13),
- *    导致网关按 21 字节校验、和 20 字节的帧对不上。设备端这边一直是对的, 不用改。
- * 这里的算法是: 帧头部分 13 字节(含 2 字节 CRC) + 数据 7 字节。
- * 注意 13 是"帧头 11 字节 + CRC 2 字节", 不是 11 —— 别把 CRC 漏掉或重复算。 */
-#define SENSOR_REPORT_FRAME_MAX_LEN     20U
+/* 上报帧总长 = 固定头 31 + 数据 7 + CRC 2 = 40 字节
+ *   [0]AA [1]55 [2]ver [3..15]gw(13) [16..28]dev(13) [29]func=0x02 [30]dlen=7
+ *   [31..37]液位高|液位低|电量%|月|日|时|分  [38][39]CRC
+ * ⚠️ SENSOR_FRAME_OVERHEAD 已含 2 字节 CRC，别再额外加 2，否则会误报"缓冲区太小"。 */
+#define SENSOR_REPORT_FRAME_MAX_LEN     40U
 /* 协议常量 */
 #define SENSOR_FRAME_HEAD0      0xAAU
 #define SENSOR_FRAME_HEAD1      0x55U
 #define SENSOR_PROTO_VER        0x01U
 #define SENSOR_FC_LEVEL_REPORT  0x02U
 #define SENSOR_DATA_LEN         0x07U
-/* 数据域以外的固定开销: 帧头部分11(AA55+ver+gw3+dev3+func+dlen) + CRC2 = 13 */
-#define SENSOR_FRAME_OVERHEAD   13U
+/* 数据域以外的固定开销：固定头31(AA55+ver+gw13+dev13+func+dlen) + CRC2 = 33 */
+#define SENSOR_FRAME_OVERHEAD   33U
+
+/* 液位换算：模块读数 -> 最终液位（测量模式 / 安装高度 / 校准偏移）
+ *   ① LEVEL：模块读数就是液位（出厂默认）
+ *   ② DIST ：模块读数是探头到水面的距离 -> 液位 = 安装高度(cm)×10 − 距离(mm)
+ *   ③ 校准偏移叠加到结果上（可负），结果按 0 饱和
+ * 返回值约定与 Level_Measure() 一致：0xFFFF = 无效。
+ * ⚠️ 上限取 65534：0xFFFF 是"无效"哨兵，不能被真实液位占用。
+ */
+uint16_t app_sensor_convert_level(uint16_t raw_mm)
+{
+    AppRuntimeState_t rt;
+    int32_t           v;
+
+    if (raw_mm == 0xFFFFU)
+    {
+        return 0xFFFFU;                 /* 读数无效：原样透传，让上层按无效处理 */
+    }
+
+    app_runtime_state_get(&rt);
+
+    if ((rt.sensor_cfg.measure_mode == DEV_MEASURE_MODE_DIST) &&
+        (rt.sensor_cfg.install_height_cm != 0U))
+    {
+        /* ⚠️ 距离模式里 raw=0 不是"水面贴着探头"，而是【没有测到回波】：
+         *    app_read_level() 在整轮采样全废时会兜底返回"上次有效值"，
+         *    而首次上电那个兜底值就是 0。要是照公式换算就成了
+         *    "液位 = 安装高度 - 0 = 满池"，凭空报一个满量程出去。
+         *    模块最小量程也有几十厘米，真实距离不会是 0，所以这里直接按无效处理。 */
+        if (raw_mm == 0U)
+        {
+            return 0U;
+        }
+        v = ((int32_t)rt.sensor_cfg.install_height_cm * 10) - (int32_t)raw_mm;
+    }
+    else
+    {
+        /* LEVEL 模式，或 DIST 但安装高度为 0（0x01 收到时就已归一化，这里再兜一次） */
+        v = (int32_t)raw_mm;
+    }
+
+    v += (int32_t)rt.sensor_cfg.calib_offset_mm;    /* 有符号：负值 = 向下修正 */
+
+    if (v < 0)
+    {
+        v = 0;                          /* 距离大于安装高度（水面低于探头/池底反射）-> 按 0 报 */
+    }
+    if (v > 65534)
+    {
+        v = 65534;                      /* 别占 0xFFFF（无效哨兵） */
+    }
+    return (uint16_t)v;
+}
+
 
 bool app_sensor_build_level_report(uint16_t level_mm, uint8_t *out_buf, uint16_t *out_len)
 {
@@ -41,9 +89,7 @@ bool app_sensor_build_level_report(uint16_t level_mm, uint8_t *out_buf, uint16_t
         return false;
     }
 
-    /* 运行期自检: 缓冲区要放得下 "帧头部分 + CRC" + 数据域。
-     * 这里 13 已经含 CRC 2 字节, 所以别再额外加 2, 否则会误报"缓冲区太小"。
-     * 目的是以后有人改长度改错了能直接返回 false, 而不是越界踩内存。 */
+    /* 运行期自检：缓冲区要放得下 固定头+CRC(33) + 数据域(7)，改错长度直接返回 false */
     if (SENSOR_REPORT_FRAME_MAX_LEN < (SENSOR_FRAME_OVERHEAD + SENSOR_DATA_LEN))
     {
         log_info("[sensor] !! frame buffer too small: %u < %u\r\n",
@@ -70,32 +116,22 @@ bool app_sensor_build_level_report(uint16_t level_mm, uint8_t *out_buf, uint16_t
     frame_buf[frame_idx++] = SENSOR_FRAME_HEAD1;
     /* 协议版本 */
     frame_buf[frame_idx++] = SENSOR_PROTO_VER;
-    /* 网关地址3字节 */
-    memcpy(&frame_buf[frame_idx], rt_state.gw_addr, 3U); frame_idx +=3U;
-    /* 设备地址3字节 */
-    memcpy(&frame_buf[frame_idx], rt_state.dev_addr, 3U); frame_idx +=3U;
+    /* 网关地址13字节（0x11 + 网关 UID） */
+    memcpy(&frame_buf[frame_idx], rt_state.gw_addr, PROTO_ADDR_LEN); frame_idx += PROTO_ADDR_LEN;
+    /* 设备地址13字节（0x21 + 本机 UID） */
+    memcpy(&frame_buf[frame_idx], rt_state.dev_addr, PROTO_ADDR_LEN); frame_idx += PROTO_ADDR_LEN;
     /* 功能码 */
     frame_buf[frame_idx++] = SENSOR_FC_LEVEL_REPORT;
     /* 数据长度 */
     frame_buf[frame_idx++] = SENSOR_DATA_LEN;
 
-    /*
-     * 【7字节数据域，保持总长度不变】
-     * offset0‑1: uint16_t 液位(大端)
-     * offset2:   uint8_t 电池百分比
-     * offset3:   uint8_t 月份 MM
-     * offset4:   uint8_t 日期 DD
-     * offset5:   uint8_t 小时 HH
-     * offset6:   uint8_t 分钟 MM
-     */
+    /* 7 字节数据域：液位(大端) | 电量% | 月 | 日 | 时 | 分 */
     frame_buf[frame_idx++] = (uint8_t)( (level_mm >> 8) & 0xFFU );
     frame_buf[frame_idx++] = (uint8_t)( level_mm & 0xFFU );
     frame_buf[frame_idx++] = bat_percent;
 
-    /* 时间字段用【北京时间】—— 协议口径就是北京时间（网关 app/protocol/lora_business.c
-     * 对这 4 个字节的注释是 "← 北京时间"，而且网关取不到 4G 时间时会直接采用设备报的值）。
-     * RTC 内部跑的是 UTC，所以这里必须走 app_time_get_bj_calendar() 做 +8h；
-     * ⚠️ 2026-10-09 修的 bug：原先是直接填 RTC 日历(=UTC)，上报出去整整差 8 小时。
+    /* 时间字段用【北京时间】（协议口径，网关取不到 4G 时间时会直接采用设备报的值）。
+     * RTC 内部跑 UTC，所以必须走 app_time_get_bj_calendar() 做 +8h；
      * RTC 还没校时则退回网关最近下发的原始北京时间（通常全 0）。 */
     if(app_time_get_bj_calendar(&cal) == 0U)
     {
@@ -122,23 +158,4 @@ bool app_sensor_build_level_report(uint16_t level_mm, uint8_t *out_buf, uint16_t
     return true;
 }
 
-bool app_sensor_level_report_send_ex(uint16_t level_mm)
-{
-    uint8_t  frame_buf[SENSOR_REPORT_FRAME_MAX_LEN];
-    uint16_t frame_len = 0U;
 
-    if(!app_sensor_build_level_report(level_mm, frame_buf, &frame_len))
-    {
-        return false;
-    }
-
-    /* 发送：发完等ACK，没ACK按 LORA_SEND_RETRY 重发 */
-    return LoraApp_SendWaitAck(frame_buf, (uint8_t)frame_len, LORA_SEND_RETRY);
-}
-
-bool app_sensor_level_report_send(void)
-{
-    /* 生产路径：液位来自液位传感器(没接/读不到时 Level_Get_Val() 返回 0xFFFF，
-     * build 里会判无效直接不发) */
-    return app_sensor_level_report_send_ex(Level_Get_Val());
-}

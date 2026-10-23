@@ -23,7 +23,7 @@ extern "C" {
 bool storage_flash_read(uint32_t flash_addr, uint8_t *buf, uint16_t len);
 
 /**
- * @brief 擦除一页flash(N32G031页大小2KB)
+ * @brief 擦除一页flash(N32G031页大小512字节/0x200)
  * @param page_addr 页起始地址
  * @return true成功
  */
