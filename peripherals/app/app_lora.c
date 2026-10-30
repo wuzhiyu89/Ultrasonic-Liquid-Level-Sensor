@@ -180,8 +180,8 @@ uint8_t LoraApp_Init(void)
                       LORA_ACK_TIMEOUT_MS);
 
     /* 接收参数：最后一位 false = 单次接收。此时驱动里 RxContinuous=false，
-     * Radio.Rx(0) 不是"无限接收"而是一个有限 symbol 超时窗口；
-     * LoraApp_ReciveMode() 会临时把 RxContinuous 打开，持续接收才成立。 */
+     * Radio.Rx(0) 不是"无限接收"而是一个有限 symbol 超时窗口（RxTimeout=0xFFFF）；
+     * "持续收"靠 TIM3 中断周期触发 rxTimeout、再由主循环重进 Radio.Rx(0) 实现。 */
     Radio.SetRxConfig(MODEM_LORA, LORA_BANDWIDTH, LORA_SPREADING_FACTOR,
                       LORA_CODINGRATE, 0U, LORA_PREAMBLE_LENGTH,
                       LORA_LLCC68_SYMBOL_TIMEOUT, LORA_FIX_LENGTH_PAYLOAD_ON,
@@ -306,7 +306,7 @@ void LoraApp_ReciveMode(void)
     }
 
     g_rxForever = true;
-    Radio.Rx(0U);                    /* 0 = 一直收(配合 RxContinuous) */
+    Radio.Rx(0U);                    /* 0 = 有限 symbol 超时窗口(RxContinuous=false)，靠 TIM3 中断循环续收 */
 }
 
 void LoraApp_Standby(void)

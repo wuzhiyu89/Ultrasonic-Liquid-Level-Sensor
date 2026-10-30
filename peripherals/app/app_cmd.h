@@ -40,7 +40,7 @@ extern "C" {
  *   ③ 校时字段全 0 = "这次不校时"（网关取不到 4G 时间时会先填 0）：其余字段照常生效、
  *      仍回 0x80。绝不能把 month=0 当非法参数拒掉整条命令。
  *   ④ 载荷单位就是秒（与网关一致），两边都不做换算。
- *   ⑤ 长度不符（任何非 18 字节）直接回 0x86(ERR_DATALEN)，绝不按错位字节解析。
+ *   ⑤ 长度不符（任何非 18 字节）直接回 0x81(ACK_ERR_RETRY)，绝不按错位字节解析。
  */
 #define APP_CMD_SET_SENSOR_PARAM_LEN   18U
 
@@ -132,7 +132,7 @@ extern "C" {
 #define APP_CMD_SLEEP_INTERVAL_MAX_S    65535U
 
 /* 注意：回 ACK 前不再单独加等待 —— LoraApp_Send() 内部已统一等
- * LORA_TX_MODE_DELAY_MS(500ms) 才切到发射，在这里再加一段会叠加成 2s，
+ * LORA_TX_MODE_DELAY_MS(500ms) 才切到发射，在这里再加一段会叠加成 1s，
  * 容易超出网关的应答窗口。要调等待只改 LORA_TX_MODE_DELAY_MS 一处。 */
 
 typedef enum

@@ -680,9 +680,11 @@ static bool app_probe_has_water(void)
 }
 
 /* 本次唤醒是谁叫醒的（打印用）。
+ * ⚠️ 有副作用：内部会【取走并清除】唤醒标志（WaterDetect_TakeWakeFlag /
+ *    app_time_take_wakeup_event 都是"读后清"），每轮只能调用一次。
  * 顺序很重要：先看"是不是水叫醒的"（EXTI 置的标志），再看 RTC ——
  * 两者可能同时发生，但"水来了"这个信息更有价值，必须先取。 */
-static const char *app_wakeup_source_str(void)
+static const char *app_wakeup_source_take_str(void)
 {
     if (WaterDetect_TakeWakeFlag() != 0U)
     {
@@ -1041,8 +1043,9 @@ static void app_production_run(void)
 
     while (1)
     {
-        /* 先读唤醒源（读后清标志，纯粹为了日志顺序好看：先报"谁叫醒的"，再报"电源恢复"） */
-        wake_src = app_wakeup_source_str();
+        /* 先读唤醒源（读后清标志，纯粹为了日志顺序好看：先报"谁叫醒的"，再报"电源恢复"）。
+         * ⚠️ 每轮只调一次：内部会清唤醒标志，重复调用会读到"other"。 */
+        wake_src = app_wakeup_source_take_str();
 
         /* ---- ⓪ 唤醒后第一件事：恢复外设域电源 ----
          * 睡前 PB7 是输入上拉、外设域被关断到 0V（外设处于复位态），
@@ -1119,6 +1122,9 @@ static void app_production_run(void)
         else
         {
             level = 0U;
+            /* 干态把 last_level 也清掉：否则"水退 -> 水再来、且这一轮超声冷启动没读到"
+             * 时会兜底复用上一次的旧液位，报出一个假值（比报 0 更隐蔽）。 */
+            last_level = 0U;
             log_info("[app] probe=dry -> skip ultrasonic, report level 0\r\n");
         }
 

@@ -4,7 +4,8 @@
  *
  * 分工：
  *   组帧/打包（液位+时间+电压等）不在这里，在业务层做好；
- *   app_lora 只负责：发送 -> 开接收等ACK -> 没ACK就重发；以及把收到的包交出去。
+ *   app_lora 只负责：发送 / 进入或退出接收 / 把收到的包交出去。
+ *   "等 ACK / 没 ACK 重发" 的时序在业务层（main.c 的 app_cmd_tick_ack 等）实现。
  */
 #ifndef __APP_LORA_H
 #define __APP_LORA_H

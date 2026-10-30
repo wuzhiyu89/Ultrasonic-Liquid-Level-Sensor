@@ -20,16 +20,6 @@
 #define WATER_DETECT_WET_RAW_THRESHOLD  800U
 #endif
 
-/* ==================== 探针标定用的可调参数（都集中在这里改） ==================== */
-/* 固定两点法（FAST/SLOW）只用于标定打点，主判水路径走下面的自适应充电。 */
-#ifndef PROBE_SETTLE_US
-#define PROBE_SETTLE_US     2000U       /* FAST 采点：加激励后等 2ms */
-#endif
-/* SLOW 采点：加激励后总共等多少毫秒（仅标定用） */
-#ifndef PROBE_SETTLE_SLOW_MS
-#define PROBE_SETTLE_SLOW_MS  200U
-#endif
-
 /* ==================== 自适应充电（"充到稳态或超时"） ====================
  * 电极泡在水里是 RC：双电层电容 + 探针线电容，串上 220k 后 τ 实测 0.3~3s；
  * 固定等 200ms 只充到百分之几，于是"泡在水里判干、短接却正常"。
@@ -67,18 +57,6 @@
 #ifndef PROBE_SAMPLES
 #define PROBE_SAMPLES       4U
 #endif
-/* 打印每个相位细节（当前代码未引用，改它没有效果） */
-#ifndef PROBE_DEBUG
-#define PROBE_DEBUG         1
-#endif
-/* 激励方式：
- *   0 = 弱驱动：PA7 只用"内部上拉/下拉"当激励源，电流几十 uA
- *   1 = 强驱动：PA7 推挽输出高/低，220k 串阻限流
- * 驱动的是真正的电极激励脚 PA7，强驱动可放心试。 */
-#ifndef PROBE_STRONG_DRIVE
-#define PROBE_STRONG_DRIVE  0
-#endif
-
 /* ==================== 【有水自动唤醒】开关 ====================
  * 1（默认）= 睡前若"上次判无水"，就把 PA7 推挽输出高、PB1 输入+下拉、开 EXTI 上升沿；
  *            水碰到电极即叫醒 STOP 里的 MCU（日志 wakeup (WATER)），干态 0 电流。

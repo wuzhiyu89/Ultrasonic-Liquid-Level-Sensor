@@ -13,7 +13,7 @@ void app_runtime_state_init(void)
 {
     /* 1.加载设备地址 */
     app_dev_param_get_dev_addr(s_runtime.dev_addr);
-    /* 新增：加载网关地址（烧录固化） */
+    /* 2.加载网关地址（Flash 里的 0x11+网关 UID；13×FF = 未绑定） */
     app_dev_param_get_gw_addr(s_runtime.gw_addr);
     /* 2.加载传感器持久化配置 */
     app_dev_param_get_sensor_cfg(&s_runtime.sensor_cfg);

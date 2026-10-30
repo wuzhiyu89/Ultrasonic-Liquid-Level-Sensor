@@ -33,7 +33,7 @@ uint16_t app_sensor_convert_level(uint16_t raw_mm);
 
 /**
  * @brief 只组装液位上报帧（不发送）
- * @param level_mm 液位高度(mm)【已换算、已含校准偏移】；台面测试可传固定值
+ * @param level_mm 液位高度(mm)【已换算、已含校准偏移】；该函数不读运行时状态，调用方可自定值
  * @param out_buf  输出缓冲(至少 40 字节: 固定头31 + CRC2 + 7字节数据)
  * @param out_len  输出帧长度
  * @retval true 组装成功；false 参数错误/液位无效(0xFFFF)

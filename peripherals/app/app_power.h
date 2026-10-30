@@ -12,7 +12,7 @@ uint16_t app_power_get_battery_mv(void);
 /**
  * @brief 电池电量百分比 0~100
  * @note  按 3.6V 锂亚一次电池(ER14505)折算：3.6V=100%，2.8V=0%，中间线性
- * @retval 0:采样失败或电压低于2.8V；100:电压高于3.6V
+ * @retval 0:采样失败或电压≤2.8V；100:电压≥3.6V
  */
 uint8_t app_power_get_battery_percent(void);
 

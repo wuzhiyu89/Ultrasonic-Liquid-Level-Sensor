@@ -261,10 +261,12 @@ bool app_dev_param_set_sensor_cfg(const DevSensorConfig_t *in_cfg)
     memcpy(&write_buf.sensor_cfg, in_cfg, sizeof(DevSensorConfig_t));
     if (!storage_flash_erase_page(DEV_PARAM_FLASH_PAGE_ADDR))
     {
+        log_info("[dev] !! set_sensor_cfg: erase failed, config NOT persisted (RAM only)\r\n");
         return false;
     }
     if (!storage_flash_write(DEV_PARAM_FLASH_PAGE_ADDR, (uint8_t *)&write_buf, sizeof(DevParamFlash_t)))
     {
+        log_info("[dev] !! set_sensor_cfg: write failed, config NOT persisted (RAM only)\r\n");
         return false;
     }
     memcpy(&s_dev_param, &write_buf, sizeof(DevParamFlash_t));

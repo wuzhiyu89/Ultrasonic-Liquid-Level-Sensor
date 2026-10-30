@@ -50,7 +50,7 @@ extern "C" {
  *   本机超声模块（AJ-SR04M / DYP 类）串口帧输出的是【探头到液面的距离】，所以：
  *     LEVEL：模块读数直接当液位（模块内部已换算，或探头朝上装）
  *     DIST ：液位 = 安装高度(cm)×10 - 距离(mm)
- *   两种之外的取值按 LEVEL（网关侧也是 `!=0 ? 1 : 0`）。 */
+ *   两种之外的取值按 DIST（app_cmd.c 归一化：非 0 一律按 DIST，网关侧 `!=0 ? 1 : 0`）。 */
 #define DEV_MEASURE_MODE_LEVEL       0U
 #define DEV_MEASURE_MODE_DIST        1U
 
@@ -86,7 +86,7 @@ typedef struct
 {
     uint32_t magic;                     /* 魔术字，校验是否有效 */
     uint8_t gw_addr[PROTO_ADDR_LEN];    /* 13 字节网关地址(0x11+网关UID)：13×FF = 未绑定 */
-    uint8_t rsv1[2];                    /* 补齐 4 字节对齐 */
+    uint8_t rsv1[2];                    /* 占位：让 sensor_cfg 落在 4 字节对齐偏移（不足 1 字节由编译器补） */
     DevSensorConfig_t sensor_cfg;       /* 传感器业务参数（运行可改） */
     uint8_t reserved[4];                /* reserved[0]=DEV_PARAM_CFG_VER，其余预留 */
     uint8_t field[APP_DEV_FIELD_LEN];   /* 设备字段 10 字节 ASCII（0x06 写 / 0x08 回） */

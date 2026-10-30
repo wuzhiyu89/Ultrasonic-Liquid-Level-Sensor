@@ -6,9 +6,7 @@
 #include "misc.h"
 #include <stddef.h>
 /* SDK 无 RTC_BKPxR（0x4C~0x9C 均为 reserved），初始化标记走 RTC->CTRL 的 BAKP 位(bit18)，
- * 见 RTC_STORE_OPERATION_SET。以下两个宏当前无代码引用，保留占位。 */
-#define RTC_BKP_FLAG        0xA5A5U
-#define RTC_BKP_INDEX       0U
+ * 见 RTC_STORE_OPERATION_SET。 */
 
 /* LSI 内部 RC 典型 30kHz：(128)*(234)=29952，逼近 30000，输出≈1Hz
  * ⚠️ LSI 温漂 24~36kHz，日历会跑慢/跑快，WakeUp 计数值不等于真实秒

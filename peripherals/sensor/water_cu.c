@@ -1,6 +1,6 @@
 #include "water_cu.h"
 #include "bsp_adc.h"
-#include "bsp_lowpower.h"    /* BSP_EXTI_WakeupPinConfig()：PB1 上升沿唤醒 */
+#include "bsp_lowpower.h"    /* BSP_EXTI_WakeupPinConfig()：探针边沿唤醒（上升沿或双边沿） */
 #include "delay.h"
 #include "n32g031_gpio.h"
 #include "n32g031_rcc.h"
@@ -25,22 +25,6 @@
 #define PROBE_DRIVE_PIN     GPIO_PIN_7      /* PA7 激励（配 PB1 做 ADC） */
 #define PROBE_ADC_PIN       GPIO_PIN_1      /* PB1 ADC_CH_9，仍在 GPIOB */
 #define PROBE_ADC_PORT      GPIOB
-
-/* 可调参数（PROBE_SETTLE_US / PROBE_SAMPLES / PROBE_STRONG_DRIVE / PROBE_DEBUG）
- * 都集中在 water_cu.h，方便统一修改 */
-
-/* 相位里把激励脚(PA7)配成的模式 */
-#if (PROBE_STRONG_DRIVE != 0)
-#define DRV_MODE_HIGH       3U      /* 推挽输出高 */
-#define DRV_MODE_LOW        4U      /* 推挽输出低 */
-#define DRV_NAME_HIGH       "pp-high"
-#define DRV_NAME_LOW        "pp-low"
-#else
-#define DRV_MODE_HIGH       1U      /* 输入+内部上拉(弱高) */
-#define DRV_MODE_LOW        2U      /* 输入+内部下拉(弱低) */
-#define DRV_NAME_HIGH       "weak-high"
-#define DRV_NAME_LOW        "weak-low"
-#endif
 
 /* PB1 模式：0=模拟(ADC)  1=输入+内部上拉  2=输入+内部下拉  3=输入+无上下拉(靠板上外部下拉) */
 static void pb1_set_mode(uint8_t mode)
@@ -74,7 +58,7 @@ static void pb1_set_mode(uint8_t mode)
 }
 
 /* 激励脚(PA7)模式：0=高阻输入  1=输入+内部上拉(弱高)  2=输入+内部下拉(弱低)
- *                   3=推挽输出高  4=推挽输出低（需 PROBE_STRONG_DRIVE=1） */
+ *                   3=推挽输出高  4=推挽输出低 */
 static void probe_drive_set_mode(uint8_t mode)
 {
     GPIO_InitType gpio;
@@ -105,11 +89,11 @@ static void probe_drive_set_mode(uint8_t mode)
             gpio.GPIO_Mode = GPIO_MODE_INPUT;
             gpio.GPIO_Pull = GPIO_PULL_DOWN;
             break;
-        case 3U:    /* 强高：推挽输出（默认不用） */
+        case 3U:    /* 强高：推挽输出 */
             gpio.GPIO_Mode = GPIO_MODE_OUTPUT_PP;
             gpio.GPIO_Pull = GPIO_NO_PULL;
             break;
-        case 4U:    /* 强低：推挽输出（默认不用） */
+        case 4U:    /* 强低：推挽输出 */
             gpio.GPIO_Mode = GPIO_MODE_OUTPUT_PP;
             gpio.GPIO_Pull = GPIO_NO_PULL;
             break;
@@ -126,8 +110,8 @@ static void probe_drive_set_mode(uint8_t mode)
  * 的区间靠它兜住，否则会睡死。 */
 static uint8_t s_last_lvl = 0U;
 
-/* 最近一次采样的 ADC 原始值与当时 PB1 的负载模式（只读，供日志/排查）。
- * raw 是区分"硬件没接对"和"门限太高"的唯一证据，别再删。 */
+/* 最近一次采样的 ADC 原始值（只读，供日志/排查）。
+ * raw 是区分"硬件没接对"和"门限太高"的关键证据。 */
 static uint16_t s_last_raw = 0U;
 
 /* 第一个采样点(加激励后 100ms 的值)与投票结果，排查用：
@@ -136,7 +120,7 @@ static uint16_t s_last_raw = 0U;
  *   first 就已很大               -> 电极短接（τ≈0）。 */
 static uint16_t s_last_raw_fast = 0U;
 static uint8_t  s_last_votes    = 0U;
-static uint16_t s_last_charge_ms = 0U;   /* 最后一轮实际充电用了多少毫秒（诊断 τ 用） */
+static uint16_t s_last_charge_ms = 0U;   /* 判水中"最好那一轮"（raw 最大）实际充电用了多少毫秒（诊断 τ 用） */
 
 /* 读一次 ADC 平均值：ADC 本体初始化/反初始化都在这里，PB1 的负载配置保持不动 */
 static uint16_t probe_adc_avg(void)
@@ -245,7 +229,7 @@ static uint16_t probe_charge(uint8_t pb1_mode, uint8_t drv_mode, uint16_t max_ms
     return v;
 }
 
-/* 最近一次采样的 ADC 原始值(0~4095)与 PB1 数字电平，供上层日志/排查读取 */
+/* 最近一次采样的 ADC 原始值(0~4095)，供上层日志/排查读取 */
 uint16_t WaterDetect_LastRaw(void)
 {
     return s_last_raw;
@@ -281,14 +265,6 @@ void WaterDetect_Init(void)
 
     probe_drive_set_mode(0U);   /* PA7(激励) 高阻 */
     pb1_set_mode(0U);           /* PB1 模拟(高阻) */
-
-    /*log_info("[probe] init: DRV(PA7)=HiZ(%s drive), PB1=analog(ADC_CH9), settle=%uus samples=%u\r\n",
-#if (PROBE_STRONG_DRIVE != 0)
-             "strong/pp",
-#else
-             "weak/pull",
-#endif
-             (unsigned)PROBE_SETTLE_US, (unsigned)PROBE_SAMPLES);*/
 }
 
 /* ---- 【电压法】判水：PA7 推挽高当激励，PB1 带泄放负载，水把回路接通电压才升起来 ---- */

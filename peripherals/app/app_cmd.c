@@ -195,7 +195,7 @@ AppCmdRet_t app_cmd_process(const uint8_t *rx_buf,
     {
     case CMD_FUNC_SET_SENSOR_PARAM:
     {
-        /* 载荷必须正好 18 字节（布局见 app_cmd.h），长度不符直接回 0x86，
+        /* 载荷必须正好 18 字节（布局见 app_cmd.h），长度不符直接回 0x81，
          * 避免按错位字节解析出垃圾参数 */
         if (data_len != APP_CMD_SET_SENSOR_PARAM_LEN)
         {
@@ -300,8 +300,7 @@ AppCmdRet_t app_cmd_process(const uint8_t *rx_buf,
         new_cfg.same_level_report_en  = rx_param.same_level_report_en;
         new_cfg.low_battery_pct       = rx_param.low_battery_pct;
         new_cfg.rsv0                  = 0U;
-        /* 注：检测间隔【不存】—— 它是 report 的派生量，由 app_cmd_detect_from_report_s() 现算；
-         *     下发帧里的"探针阻值"字段已按需求从协议删除, 不再解析 */
+        /* 注：检测间隔【不存】—— 它是 report 的派生量，由 app_cmd_detect_from_report_s() 现算 */
         app_runtime_state_set_sensor_cfg(&new_cfg);
 
         /* ---- 校时（时间字段全 0 时整段跳过，参数已经生效） ---- */
@@ -354,7 +353,9 @@ AppCmdRet_t app_cmd_process(const uint8_t *rx_buf,
                 break;
             }
             log_info("[cmd] 0x01 rtc updated, unix_ts=%lu\r\n", (unsigned long)utc_ts);
-            /* 时间不写Flash：STOP低功耗不会丢RAM，掉电后等网关重新校时即可 */
+            /* 这里不立即写 Flash：RTC 时间由 main.c 定期落盘到独立时间戳页
+             * （app_time_save_to_flash -> app_dev_param_set_persist_unix_ts），
+             * 冷启动靠 app_time_init 从该页恢复 RTC，不必等网关重新校时。 */
         }
 
         ret_code = CMD_RET_OK;

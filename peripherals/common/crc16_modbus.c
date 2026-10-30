@@ -31,7 +31,7 @@ uint16_t crc16_modbus(const uint8_t *data, uint16_t len)
 
 bool crc16_modbus_check(const uint8_t *frame, uint16_t frame_len)
 {
-    /* 帧长度至少要大于2字节，否则直接失败 */
+    /* 帧长度至少 2 字节（1 字节数据 + 2 字节 CRC 的最小帧），否则直接失败 */
     if (frame_len < 2U)
     {
         return false;

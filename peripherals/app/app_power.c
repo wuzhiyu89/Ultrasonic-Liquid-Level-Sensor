@@ -10,7 +10,7 @@
 #define VREFINT_MV          1160U
 
 /* 合理电压范围(mV)，超出说明采样异常，直接返回0
- * 上限放到5.5V是为了台面用5V/3.3V电源调试时也能正常显示 */
+ * 上限放到 5.5V 以兼容 5V/3.3V 供电场合 */
 #define VDD_MIN_VALID_MV    2200U
 #define VDD_MAX_VALID_MV    5500U
 

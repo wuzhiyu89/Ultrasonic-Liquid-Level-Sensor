@@ -14,7 +14,7 @@
 #include "delay.h"              /* delay_ms() */
 #include "log.h"
 
-/* ==================== 配对时序（测试阶段：不考虑低功耗） ==================== */
+/* ==================== 配对时序 ==================== */
 /* 发送周期(ms)：需求是"每 5s 发送一次" */
 #ifndef APP_PAIR_PERIOD_MS
 #define APP_PAIR_PERIOD_MS      5000U

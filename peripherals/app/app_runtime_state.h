@@ -54,10 +54,12 @@ void app_runtime_state_init(void);
 
 /**
  * @brief 更新网关下发的校时时间（app_cmd解析到网关校时命令调用）
- * @param month
- * @param day
- * @param hour
- * @param minute
+ * @param year   两位年份(2000+)
+ * @param month  1..12
+ * @param day    1..31
+ * @param week   1=周一..7=周日，0=网关没填
+ * @param hour   0..23
+ * @param minute 0..59
  * @note second自动置0；仅更新RAM，不写Flash
  */
 void app_runtime_state_set_gateway_time(uint8_t year, uint8_t month, uint8_t day, uint8_t week, uint8_t hour, uint8_t minute);
